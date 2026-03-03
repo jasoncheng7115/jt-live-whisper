@@ -6,7 +6,7 @@
 
 Author: Jason Cheng ([Jason Tools](https://jasoncheng.com.tw))
 
-<<待放擷圖：主畫面 -- 即時英翻中字幕運作中>>
+![即時英翻中字幕運作中](images/realtime-en2zh-1.png)
 
 ## 為什麼選擇 jt-live-whisper？
 
@@ -34,17 +34,19 @@ Author: Jason Cheng ([Jason Tools](https://jasoncheng.com.tw))
 ### 1. 即時語音轉錄翻譯（最強功能）
 擷取 macOS 系統音訊，本地端 AI 即時辨識語音並翻譯成繁體中文字幕顯示於終端機。開會、看影片、聽 Podcast 即時翻譯。
 
-<<待放擷圖：即時英翻中字幕畫面>>
+![即時英翻中字幕畫面](images/realtime-en2zh-2.png)
 
 ### 2. 離線音訊檔批次處理
 支援 mp3 / wav / m4a / flac 等格式，使用 faster-whisper AI 模型進行離線轉錄翻譯，適合會後補做逐字稿。
 
-<<待放擷圖：離線語音轉錄翻譯畫面>>
+![離線處理選單 -- 模式與模型選擇](images/offline-menu-1.png)
+
+![離線處理選單 -- LLM 伺服器與說話者辨識](images/offline-menu-2.png)
 
 ### 3. AI 說話者辨識（Speaker Diarization）
 自動辨識音訊中的不同講者，以不同顏色標示，支援自動偵測或手動指定講者人數。
 
-<<待放擷圖：說話者辨識 -- 不同講者以不同顏色顯示>>
+![說話者辨識 -- 不同講者以不同顏色顯示](images/offline-diarize-result.png)
 
 ### 4. AI 會議摘要
 即時按 Ctrl+S 或批次對記錄檔生成摘要，透過本地端 LLM 產出重點整理 + 校正逐字稿。
@@ -123,7 +125,7 @@ ollama pull qwen2.5:14b
 
 程式會進入互動式選單，依序選擇功能模式、AI 辨識模型、翻譯引擎等設定。
 
-<<待放擷圖：互動式選單畫面>>
+![互動式選單](images/interactive-menu.png)
 
 ## 使用方式
 
