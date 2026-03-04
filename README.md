@@ -1,4 +1,4 @@
-# jt-live-whisper v1.7.7
+# jt-live-whisper v1.7.8
 
 **100% 全地端 AI 語音工具集**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要，所有 AI 模型皆在自有設備上運行，資料不經過任何雲端服務。
 
@@ -65,6 +65,7 @@ Author: Jason Cheng (Jason Tools)
 
 - **多種本地端 AI 語音辨識引擎**：即時辨識：Whisper（高準確度）/ Moonshine（超低延遲 ~300ms）；離線音訊檔轉錄：faster-whisper（支援 VAD 靜音過濾）
 - **多種本地端翻譯引擎**：LLM 大型語言模型（Ollama / OpenAI 相容伺服器）或 Argos 離線翻譯
+- **會議主題感知翻譯**：可指定會議主題（如「ZFS 儲存管理」），讓 LLM 根據領域上下文精準翻譯專業術語
 - **自動偵測 LLM 伺服器**：支援 Ollama、LM Studio、Jan.ai、vLLM、LocalAI、llama.cpp、LiteLLM 等本地端 LLM 伺服器
 - **互動式選單 + CLI 模式**：新手友善的選單介面，進階用戶可用命令列參數直接啟動
 
@@ -206,6 +207,7 @@ ollama pull qwen2.5:14b
 | `--engine ENGINE` | 翻譯引擎 (ollama / argos) | ollama |
 | `--ollama-model MODEL` | LLM 翻譯模型 | qwen2.5:14b |
 | `--ollama-host HOST` | LLM 伺服器位址 | 192.168.1.40:11434 |
+| `--topic TOPIC` | 會議主題（提升翻譯品質） | |
 | `--summary-model MODEL` | 摘要用 LLM 模型 | qwen2.5:14b |
 | `--input FILE` | 離線處理音訊檔 | |
 | `--diarize` | 啟用 AI 講者辨識 | |
