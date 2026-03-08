@@ -779,6 +779,8 @@ CLI 模式使用 `--record` 參數啟用（自動選錄音裝置），或用 `--
 
 ![時間逐字稿 HTML](images/offline-transcript.png)
 
+時間逐字稿 HTML 內嵌音訊播放器與波形圖，可直接點選波形任意位置跳至該時間點；播放時對應的逐字稿段落會即時以高亮區塊標示，方便對照聆聽。
+
 **模型選擇：**
 
 `--input` 模式使用 faster-whisper，支援 `-m` 參數指定模型。模型會在首次使用時自動從 HuggingFace 下載。
