@@ -299,7 +299,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 **GPU 伺服器 語音辨識伺服器（選填）：**
 
-安裝最後會詢問是否設定GPU 伺服器 語音辨識伺服器。若有 NVIDIA GPU 伺服器（如 DGX Spark / Ubuntu + CUDA），安裝腳本會透過 SSH 自動在伺服器安裝以下套件，大幅加速語音辨識和講者辨識：
+安裝最後會詢問是否設定GPU 伺服器 語音辨識伺服器。若有安裝 NVIDIA GPU 的 Ubuntu/Linux 主機（消費級 RTX 4090/5090 亦可，需已安裝 CUDA），安裝腳本會透過 SSH 自動在伺服器安裝以下套件，大幅加速語音辨識和講者辨識：
 
 | 項目 | 說明 |
 |---|---|
