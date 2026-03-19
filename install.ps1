@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.14.1 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.14.2 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -760,6 +760,7 @@ $corePackages = @(
     @("fastapi",                         "fastapi（WebUI 伺服器）"),
     @("uvicorn",                         "uvicorn（WebUI ASGI 伺服器）"),
     @("websockets",                      "websockets（WebUI 即時通訊）"),
+    @("python-multipart",               "python-multipart（WebUI 檔案上傳）"),
     @("argostranslate",                  "Argos Translate（離線翻譯備援）")
 )
 

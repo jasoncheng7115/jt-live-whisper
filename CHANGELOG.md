@@ -1,5 +1,11 @@
 # Changelog
 
+### v2.14.2 (2026-03-19)
+
+**修正**
+- install.ps1 本機 venv 套件清單補上 python-multipart（WebUI 檔案上傳需要，舊版安裝缺少此套件會導致 WebUI 啟動失敗）
+- webui.py 啟動時自動檢查並安裝 python-multipart（免手動 pip install）
+
 ### v2.14.1 (2026-03-19)
 
 **新功能**

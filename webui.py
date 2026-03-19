@@ -29,6 +29,14 @@ except ImportError:
     print("  pip install fastapi uvicorn websockets")
     sys.exit(1)
 
+# python-multipart 是 FastAPI 檔案上傳必要套件，舊版安裝可能缺少
+try:
+    import multipart  # noqa: F401
+except ImportError:
+    print("[提示] 正在安裝 python-multipart（檔案上傳需要）...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "python-multipart"])
+    print("[完成] python-multipart 已安裝")
+
 # ─── 設定 ────────────────────────────────────────────────────
 TCP_PORT = 19780
 WEB_PORT = 19781
@@ -315,7 +323,7 @@ def _get_config():
         "gpu_host": gpu_host, "summary_descs": summary_descs,
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
-        "last": last, "version": "2.14.1",
+        "last": last, "version": "2.14.2",
     }
 
 
