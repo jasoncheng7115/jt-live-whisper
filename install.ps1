@@ -301,7 +301,7 @@ $banner_line = '=' * $cols
 
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.14.4 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.14.5 - 100% 全地端 AI 語音工具集 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -547,9 +547,26 @@ $GPU_MEMORY_MB  = 0
 $CUDA_VERSION   = ""
 $TORCH_CUDA_TAG = ""
 
-if (cmd_exists "nvidia-smi") {
+# nvidia-smi 可能不在 PATH 中（完全重裝後 PATH 可能被清掉）
+$nvidiaSmi = "nvidia-smi"
+if (-not (cmd_exists $nvidiaSmi)) {
+    $nvSmiFallbacks = @(
+        "$env:SystemRoot\System32\nvidia-smi.exe",
+        "${env:ProgramFiles}\NVIDIA Corporation\NVSMI\nvidia-smi.exe"
+    )
+    foreach ($p in $nvSmiFallbacks) {
+        if (Test-Path $p) { $nvidiaSmi = $p; break }
+    }
+}
+if ((cmd_exists $nvidiaSmi) -or (Test-Path $nvidiaSmi)) {
     try {
-        $smiCsv = & nvidia-smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null
+        $smiCsv = & $nvidiaSmi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $smiCsv) {
+            # nvidia-smi 存在但執行失敗
+            check_warn "nvidia-smi 執行失敗（exit code: $LASTEXITCODE），可能驅動版本不符"
+            info "nvidia-smi 路徑: $nvidiaSmi"
+            info "請至 https://www.nvidia.com/drivers/ 更新 NVIDIA 驅動程式"
+        }
         if ($LASTEXITCODE -eq 0 -and $smiCsv) {
             # 多 GPU 時取第一張
             if ($smiCsv -is [array]) { $smiCsv = $smiCsv[0] }
@@ -559,7 +576,7 @@ if (cmd_exists "nvidia-smi") {
             $GPU_AVAILABLE = $true
 
             # CUDA 版本
-            $cudaLine = (& nvidia-smi 2>$null) -match "CUDA Version"
+            $cudaLine = (& $nvidiaSmi 2>$null) -match "CUDA Version"
             if ($cudaLine) {
                 if ($cudaLine -is [array]) { $cudaLine = $cudaLine[0] }
                 $CUDA_VERSION = ($cudaLine -replace '.*CUDA Version:\s*' -replace '\s.*').Trim()
@@ -587,6 +604,12 @@ if (cmd_exists "nvidia-smi") {
 if (-not $GPU_AVAILABLE) {
     check_notice "未偵測到 NVIDIA GPU，將安裝 CPU 版本"
     info "翻譯建議使用區域網路 LLM 伺服器（--llm-host）或 NLLB / Argos 離線翻譯"
+    # 診斷：若有 GPU 但偵測不到，提示可能原因
+    $nvGpuPci = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "NVIDIA" }
+    if ($nvGpuPci) {
+        check_warn "系統有 NVIDIA 裝置（$($nvGpuPci.Name)）但 nvidia-smi 無法執行"
+        info "可能原因：NVIDIA 驅動未安裝或版本過舊，請至 https://www.nvidia.com/drivers/ 更新驅動"
+    }
 }
 
 # ─── Python ───────────────────────────────────────────────────

@@ -1,5 +1,34 @@
 # Changelog
 
+### v2.14.5 (2026-03-20)
+
+**改進**
+- WebUI 上方狀態列新增「場景」膠囊（如「訓練 8s」），離線模式不顯示
+- WebUI 「錄音中」「降噪」膠囊移至底部控制列（裝置膠囊右側），上方空間更簡潔
+- WebUI Header 新增「即時模式」/「離線處理」標籤（模式名稱旁）
+- WebUI 底部狀態列有處理進度時自動顯示 spinner 動畫
+- WebUI 多次摘要功能暫時隱藏（整合品質不穩定）
+
+**修正**
+- NLLB 模型載入失敗自動修復：偵測 config.json 缺失時自動從 HuggingFace 重新下載（新版 ctranslate2 需要此檔案）
+- 摘要標題格式自動修正：LLM 輸出 `### 最終摘要` 等非標準格式時自動修正為 `## 重點摘要` / `## 校正逐字稿`
+- 摘要缺少校正逐字稿時自動補發 LLM 請求（與重點摘要缺失的補發機制對齊）
+- 辨識結果 0 段時終端機和 WebUI 提示可能原因（功能模式選錯、音訊靜音、品質太差）
+- WebUI 離線處理模式不再顯示「錄音中」「降噪」「麥克風」膠囊
+- WebUI 雙向模式切回其他模式時 GPU 伺服器選項可正確選擇（修正 `_asrLastVal` 追蹤邏輯）
+- 終端機摘要狀態列視窗大小改變時不再殘影（改善 scroll region resize 邏輯）
+- install.ps1 nvidia-smi 執行失敗時顯示路徑和 exit code 協助診斷
+
+
+
+**改進**
+- WebUI 按鈕加 SVG icon：開始（播放三角形）、密碼顯示/隱藏（眼睛）、儲存密碼（磁碟片）
+- WebUI 所有輸入框與按鈕加 tooltip（30 個）
+- install.ps1 nvidia-smi 路徑 fallback（搜尋 System32 和 NVSMI 目錄）
+- install.ps1 GPU 偵測失敗時透過 WMI 診斷是否有 NVIDIA 裝置，提示更新驅動
+- webui.py Ctrl+C 退出不再顯示 PyTorch atexit 錯誤（os._exit）
+- README.md / SOP.md 目錄結構補齊 webui.py、webui.html 等檔案
+
 ### v2.14.4 (2026-03-19)
 
 **新功能**

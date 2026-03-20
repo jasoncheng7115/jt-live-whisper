@@ -370,7 +370,7 @@ def _get_config():
         "gpu_host": gpu_host, "summary_descs": summary_descs,
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
-        "last": last, "version": "2.14.4",
+        "last": last, "version": "2.14.5",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }
@@ -556,6 +556,9 @@ def _build_args(body: dict) -> list:
         sm = body.get("summary_model", "").strip()
         if sm:
             args.extend(["--summary-model", sm])
+        sr = body.get("summary_rounds", 1)
+        if sr and int(sr) > 1:
+            args.extend(["--summary-rounds", str(int(sr))])
     if body.get("local_asr"):
         args.append("--local-asr")
     device = body.get("device")
@@ -589,6 +592,7 @@ async def api_start(request: Request, body: dict = {}):
             "num_speakers": body.get("num_speakers", 0),
             "summarize": body.get("summarize", False),
             "summary_model": body.get("summary_model", ""),
+            "summary_rounds": body.get("summary_rounds", 1),
         }
         CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=4), encoding="utf-8")
     except Exception:
@@ -759,6 +763,7 @@ def main():
     finally:
         _stop_proc()
         print("\n  WebUI 已停止")
+        os._exit(0)  # 避免 PyTorch atexit cleanup 的 KeyboardInterrupt 錯誤
 
 
 if __name__ == "__main__":

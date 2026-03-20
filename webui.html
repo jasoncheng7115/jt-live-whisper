@@ -160,7 +160,8 @@ body:not(.has-live){overflow:auto}
 kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;border:1px solid rgba(255,255,255,.3);border-radius:3px;background:rgba(255,255,255,.15);margin-left:4px;vertical-align:middle;line-height:1.4}
 .mode-toggle kbd{border-color:var(--border);background:var(--bg3);color:var(--text-dim)}.mode-toggle.active kbd{border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.15);color:#fff}
 .new-btn{background:var(--accent);color:#fff;border:none;padding:5px 14px;border-radius:16px;font-size:12px;cursor:pointer;display:none;position:absolute;left:50%;transform:translateX(-50%)}.new-btn.vis{display:inline-block}
-.bar-info{font-size:12px;color:var(--text-dim);margin-left:12px}
+.bar-info{font-size:12px;color:var(--text-dim);margin-left:12px;display:inline-flex;align-items:center;gap:6px}
+#bInfo:not(:empty)::before{content:'';width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
 .disc-msg{text-align:center;padding:16px;color:var(--text);font-size:14px;border:1px solid var(--border);border-radius:var(--radius-sm);margin:12px auto;max-width:360px;background:var(--bg3);line-height:1.8}
 .disc-msg .disc-title{font-weight:600;margin-bottom:4px}.disc-msg .disc-path{font-size:12px;color:var(--accent);word-break:break-all}
 .toast{position:fixed;top:60px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:var(--radius-sm);font-size:14px;z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.25);animation:toastIn .3s ease}
@@ -187,7 +188,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
 </head>
 <body>
 <div class="hdr">
-  <div class="hdr-left"><span class="hdr-dot" id="dot"></span><a class="hdr-title" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" style="color:#fff;text-decoration:none">jt-live-whisper</a><span class="hdr-ver" id="verLabel"></span><div class="hdr-stats"><span id="hMode">--</span><span id="hCount"></span></div></div>
+  <div class="hdr-left"><span class="hdr-dot" id="dot"></span><a class="hdr-title" href="https://github.com/jasoncheng7115/jt-live-whisper" target="_blank" style="color:#fff;text-decoration:none">jt-live-whisper</a><span class="hdr-ver" id="verLabel"></span><div class="hdr-stats"><span id="hMode">--</span><span id="hSource" style="opacity:.6"></span><span id="hCount"></span></div></div>
   <div class="hdr-right"><button class="hdr-btn" onclick="toggleTheme()" id="tBtn">深色主題</button></div>
 </div>
 <div class="setup" id="pSetup">
@@ -247,11 +248,14 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
     <div class="checks">
       <label><input type="checkbox" id="iDiarize" onchange="onDiarizeChg()"> 講者辨識</label>
       <label><input type="checkbox" id="iSummarize" onchange="onSummarizeChg()"> 產生摘要</label>
+      <!-- 多次摘要功能暫時隱藏 -->
+      <label style="display:none"><select id="iSumRounds"><option value="1">1</option></select></label>
     </div>
     <div class="fg" id="rNumSpk" style="display:none;margin-top:10px">
       <label>講者人數</label>
       <div style="display:flex;align-items:center;gap:8px"><input type="number" id="iNumSpk" min="0" max="20" value="0" style="width:80px"><span style="font-size:12px;color:var(--text-dim)">0 = 自動偵測，若已知人數建議填入可提升精準度</span></div>
     </div>
+    <div class="fg" id="rSumRoundsHint" style="display:none"></div>
     <div class="fg" id="rSumModel" style="display:none;margin-top:10px">
       <label>摘要模型</label>
       <div class="csel" id="iSumModel" data-value=""></div>
@@ -272,11 +276,11 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
   <div class="sec" id="rSecurity" style="display:none">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-linecap="round"/></svg>安全設定</div>
     <div class="sec-hint">設定遠端存取密碼。本機（localhost）存取不需密碼。</div>
-    <div class="fg"><label>唯讀密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwRead" placeholder="空白 = 不需密碼即可觀看字幕" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwRead',this)" style="flex-shrink:0;min-width:50px">顯示</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">遠端觀看即時字幕用，不能操作設定</div></div>
-    <div class="fg"><label>管理密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwAdmin" placeholder="空白 = 不啟用遠端管理" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwAdmin',this)" style="flex-shrink:0;min-width:50px">顯示</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="pwAdminHint">未設定 = 遠端無法啟動/停止/切換裝置</div></div>
-    <div style="margin-top:8px"><button class="test-btn" onclick="savePw()">儲存密碼</button><span id="pwResult" style="margin-left:8px;font-size:12px"></span></div>
+    <div class="fg"><label>唯讀密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwRead" placeholder="空白 = 不需密碼即可觀看字幕" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwRead',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">遠端觀看即時字幕用，不能操作設定</div></div>
+    <div class="fg"><label>管理密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwAdmin" placeholder="空白 = 不啟用遠端管理" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwAdmin',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="pwAdminHint">未設定 = 遠端無法啟動/停止/切換裝置</div></div>
+    <div style="margin-top:8px"><button class="test-btn" onclick="savePw()" style="display:inline-flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>儲存密碼</button><span id="pwResult" style="margin-left:8px;font-size:12px"></span></div>
   </div>
-  <button class="go-btn" id="goBtn" onclick="go()">開始</button>
+  <button class="go-btn" id="goBtn" onclick="go()"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor;stroke:none;vertical-align:middle;margin-right:6px"><polygon points="5,3 19,12 5,21"/></svg>開始</button>
 </div>
 </div>
 <!-- Live -->
@@ -287,8 +291,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
       <span class="sbadge sbadge-mode" id="bMode"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="sMode"></span></span>
       <span class="sbadge sbadge-model" id="bModel"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" stroke-linecap="round"/></svg><span id="sModel"></span></span>
       <span class="sbadge sbadge-trans" id="bTrans" style="display:none"><svg viewBox="0 0 24 24"><path d="M2 12C2 17.5 6.5 22 12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12Z" stroke="currentColor"/><path d="M2.6 15.5H21.4M2.6 8.5H21.4" stroke="currentColor"/></svg><span id="sEngine"></span></span>
-      <span class="sbadge sbadge-rec" id="bRec" style="display:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>錄音中</span>
-      <span class="sbadge sbadge-denoise" id="bDenoise" style="display:none"><svg viewBox="0 0 24 24"><path d="M2 12C2 6.5 6.5 2 12 2M22 12C22 17.5 17.5 22 12 22M8 12C8 9.8 9.8 8 12 8M16 12C16 14.2 14.2 16 12 16" stroke="currentColor" stroke-linecap="round"/></svg>降噪</span>
+      <span class="sbadge" id="bScene" style="display:none;background:rgba(108,117,125,.12);color:var(--text-dim)"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg><span id="sScene"></span></span>
       <span class="sbadge sbadge-mic" id="bMic" style="display:none"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" fill="none"/></svg>麥克風</span>
       <span class="sbadge sbadge-diarize" id="bDiarize" style="display:none"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><circle cx="9" cy="7" r="4" stroke="currentColor" fill="none" stroke-width="1.5"/><path d="M23 21v-2a4 4 0 0 0-3-3.87" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/><path d="M16 3.13a4 4 0 0 1 0 7.75" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/></svg>講者辨識</span>
       <span class="sbadge sbadge-summarize" id="bSummarize" style="display:none"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linejoin="round"/><path d="M8 8h8M8 12h8M8 16h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>摘要</span>
@@ -296,7 +299,7 @@ kbd{display:inline-block;font-family:inherit;font-size:10px;padding:1px 5px;bord
     <div class="sbar-right"><span id="sCount">0 句</span><div class="vol-bar" id="volBar"></div></div>
   </div>
   <div class="msgs" id="msgs"></div>
-  <div class="bar"><div><button class="stop-btn" id="stopBtn" onclick="stop()">停止 <kbd>S</kbd></button><button class="stop-btn" id="pauseBtn" onclick="togglePause()" style="background:var(--orange);margin-left:8px">暫停 <kbd>P</kbd></button><span class="bar-info" id="bInfo"></span><span class="bar-info" id="bDevices" style="margin-left:8px"></span></div><div><button class="mode-toggle" id="subBtn" onclick="toggleSubMode()">字幕模式 <kbd>T</kbd></button><button class="new-btn" id="newBtn" onclick="toEnd()">新訊息 ↓</button></div></div>
+  <div class="bar"><div><button class="stop-btn" id="stopBtn" onclick="stop()">停止 <kbd>S</kbd></button><button class="stop-btn" id="pauseBtn" onclick="togglePause()" style="background:var(--orange);margin-left:8px">暫停 <kbd>P</kbd></button><span class="bar-info" id="bInfo"></span><span class="bar-info" id="bDevices" style="margin-left:8px"></span><span id="bBarBadges" style="margin-left:8px;display:inline-flex;gap:4px"><span class="sbadge sbadge-rec" id="bRec" style="display:none"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg>錄音中</span><span class="sbadge sbadge-denoise" id="bDenoise" style="display:none"><svg viewBox="0 0 24 24"><path d="M2 12C2 6.5 6.5 2 12 2M22 12C22 17.5 17.5 22 12 22M8 12C8 9.8 9.8 8 12 8M16 12C16 14.2 14.2 16 12 16" stroke="currentColor" stroke-linecap="round"/></svg>降噪</span></span></div><div><button class="mode-toggle" id="subBtn" onclick="toggleSubMode()">字幕模式 <kbd>T</kbd></button><button class="new-btn" id="newBtn" onclick="toEnd()">新訊息 ↓</button></div></div>
 </div>
 <script>
 const $=id=>document.getElementById(id),msgsEl=$('msgs'),dot=$('dot'),newBtn=$('newBtn');
@@ -372,10 +375,10 @@ async function loadCfg(){
   // 離線處理選項
   if(L.diarize){$('iDiarize').checked=true;onDiarizeChg()}
   if(L.num_speakers>0)$('iNumSpk').value=L.num_speakers;
-  if(L.summarize){$('iSummarize').checked=true;onSummarizeChg()}
+  if(L.summarize){$('iSummarize').checked=true;if(L.summary_rounds>1)$('iSumRounds').value=L.summary_rounds;onSummarizeChg()}
   if(c.summary_descs)_sumDescs=c.summary_descs;
   _updateSumModels(c.llm_models.map(m=>m.value));cselSetValue($('iSumModel'),L.summary_model||'');
-  engChg();$('iMode').addEventListener('change',()=>{engChg();_updateModelRec(cselVal($('iMode')))});$('iEngine').addEventListener('change',engChg);$('iAsrLoc').addEventListener('change',engChg);
+  engChg();$('iMode').addEventListener('change',()=>{engChg();_updateModelRec(cselVal($('iMode')))});$('iEngine').addEventListener('change',engChg);$('iAsrLoc').addEventListener('change',()=>{const v=cselVal($('iAsrLoc'));if(v&&!['en_zh','ja_zh'].includes(cselVal($('iMode'))))_asrLastVal=v;engChg()});
   const st=await(await fetch('/api/status',{headers:_authHeaders()})).json();
   if(_authRole==='read'){
     // 唯讀模式：有在執行就直接進字幕頁，否則顯示等待畫面
@@ -393,7 +396,9 @@ async function loadCfg(){
 }
 function onSourceChg(){const isFile=cselVal($('iSource'))==='file';$('fileArea').classList.toggle('show',isFile);$('rDevices').style.display=isFile?'none':'';$('rScene').style.display=isFile?'none':'';$('rOffline').style.display=isFile?'':'none';$('rAsrLoc').style.display=isFile?'':'';$('iDenoise').parentElement.style.display=isFile?'none':'';$('iRec').parentElement.style.display=isFile?'none':'';$('iMic').parentElement.style.display=isFile?'none':'';$('asrHint').textContent=isFile?'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。':'選擇辨識模式與引擎。雙向模式建議使用耳麥避免影響。場景的緩衝長度越長句子越完整，越短反應越即時。';if(isFile)loadFiles()}
 function onDiarizeChg(){$('rNumSpk').style.display=$('iDiarize').checked?'':'none'}
-function onSummarizeChg(){$('rSumModel').style.display=$('iSummarize').checked?'':'none'}
+function onSummarizeChg(){const on=$('iSummarize').checked;$('rSumModel').style.display=on?'':'none';$('iSumRounds').disabled=!on;$('rSumRoundsHint').style.display=on&&parseInt($('iSumRounds').value)>1?'':'none'}
+$('iSumRounds').addEventListener('change',onSummarizeChg);
+
 let _allFiles=[];
 async function loadFiles(){
   const r=await fetch('/api/files'),d=await r.json();_allFiles=d.files||[];_selectedFiles=[];$('fileFilter').value='';renderFiles()
@@ -427,10 +432,12 @@ function engChg(){
   if(isRec){$('rAsrLoc').style.display='none';$('rOffline').style.display='none'}
   else{$('rOffline').style.display=isFile?'':'none'}
   // 雙向模式：強制本機，GPU 不支援
-  if(isBidi&&!isFile){cselSetValue($('iAsrLoc'),'local');
+  if(isBidi&&!isFile){
     const asrItems=[{value:'gpu',label:'GPU 伺服器（雙向模式不支援）',tag:'不支援此模式',disabled:true},{value:'local',label:'本機',tag:''}];
     cselSetItems($('iAsrLoc'),asrItems);cselSetValue($('iAsrLoc'),'local');
-  }else if(!isRec&&_asrItemsCache){cselSetItems($('iAsrLoc'),_asrItemsCache);cselSetValue($('iAsrLoc'),_asrLastVal||'local')}
+  }else if(!isRec&&_asrItemsCache){
+    cselSetItems($('iAsrLoc'),_asrItemsCache);cselSetValue($('iAsrLoc'),_asrLastVal||'local');
+  }
   // 根據模式標記不支援的引擎（反灰 + 不可選）
   const noArgos=['en_zh','ja_zh','zh2en','ja2zh','zh2ja'].includes(m);
   if(_allEngines.length){
@@ -476,7 +483,7 @@ async function go(){
   curCfg={mode,modeLabel:_modeLabels[mode]||mode,model:cselVal($('iModel')),engine:eng,asrLoc,isFile,record:$('iRec').checked,denoise:$('iDenoise').checked,mic:$('iMic').checked,diarize:isFile&&$('iDiarize').checked,summarize:isFile&&$('iSummarize').checked};
   $('goBtn').disabled=true;$('goBtn').textContent='啟動中...';
   try{const b={mode,model:cselVal($('iModel')),scene:cselVal($('iScene')),engine:cselVal($('iEngine')),llm_model:cselVal($('iLlmModel')),llm_host:$('iLlmHost').value,topic:$('iTopic').value,record:$('iRec').checked,mic:$('iMic').checked,denoise:$('iDenoise').checked,local_asr:cselVal($('iAsrLoc'))==='local',device:cselVal($('iDevice'))||null};
-  if(isFile&&_selectedFiles.length){b.input_files=_selectedFiles;if($('iDiarize').checked){b.diarize=true;const ns=parseInt($('iNumSpk').value)||0;if(ns>0)b.num_speakers=ns}if($('iSummarize').checked){b.summarize=true;const sm=cselVal($('iSumModel'));if(sm)b.summary_model=sm}}
+  if(isFile&&_selectedFiles.length){b.input_files=_selectedFiles;if($('iDiarize').checked){b.diarize=true;const ns=parseInt($('iNumSpk').value)||0;if(ns>0)b.num_speakers=ns}if($('iSummarize').checked){b.summarize=true;const sm=cselVal($('iSumModel'));if(sm)b.summary_model=sm;const sr=parseInt($('iSumRounds').value)||1;if(sr>1)b.summary_rounds=sr}}
   const r=await fetch('/api/start',{method:'POST',headers:_authHeaders(),body:JSON.stringify(b)});const d=await r.json();
   if(d.status==='started'){_lastStartBody=JSON.parse(JSON.stringify(b));_curDeviceId=b.device;showLive();$('hMode').textContent=curCfg.modeLabel}}catch(e){showToast('啟動失敗: '+e.message,'err')}
   $('goBtn').disabled=false;$('goBtn').textContent='開始';
@@ -493,13 +500,19 @@ function toggleSubMode(){const entering=!$('pLive').classList.contains('sub-mode
 function showLive(){$('pSetup').style.display='none';$('pLive').classList.add('on');document.body.classList.add('has-live');
   const isBidi=['en_zh','ja_zh'].includes(curCfg.mode);$('pLive').classList.toggle('bidi',isBidi);
   msgsEl.innerHTML='';cnt=0;_discShown=false;$('hCount').textContent='';$('sCount').textContent='0 句';
-  $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
+  $('hMode').textContent=curCfg.modeLabel||curCfg.mode;$('hSource').textContent=curCfg.isFile?'離線處理':'即時模式';$('sMode').textContent=curCfg.modeLabel||curCfg.mode;
   $('sModel').textContent=(curCfg.model?(curCfg.asrLoc+' '+curCfg.model):'');
   const hasEng=curCfg.engine&&!['en','zh','ja','record'].includes(curCfg.mode);
   const _eLbl=hasEng?(curCfg.engine==='llm'?'LLM '+(cselVal($('iLlmModel'))||''):'本機 '+curCfg.engine.toUpperCase()):'';
   $('sEngine').textContent=_eLbl;$('bTrans').style.display=hasEng?'inline-flex':'none';
-  $('bRec').style.display=curCfg.record?'inline-flex':'none';$('bDenoise').style.display=curCfg.denoise?'inline-flex':'none';$('bMic').style.display=curCfg.mic?'inline-flex':'none';
-  $('bDiarize').style.display=curCfg.diarize?'inline-flex':'none';$('bSummarize').style.display=curCfg.summarize?'inline-flex':'none';
+  // 場景膠囊（即時模式才顯示）
+  const _sceneLabels={'meeting':'會議 5s','training':'訓練 8s','presentation':'簡報 12s','subtitle':'字幕 3s'};
+  const _sceneVal=cselVal($('iScene'))||'training';
+  if(!curCfg.isFile){$('sScene').textContent=_sceneLabels[_sceneVal]||_sceneVal;$('bScene').style.display='inline-flex'}else{$('bScene').style.display='none'}
+  // 錄音/降噪移到底部
+  $('bRec').style.display=!curCfg.isFile&&curCfg.record?'inline-flex':'none';$('bDenoise').style.display=!curCfg.isFile&&curCfg.denoise?'inline-flex':'none';$('bMic').style.display=!curCfg.isFile&&curCfg.mic?'inline-flex':'none';
+  $('bDiarize').style.display=curCfg.diarize?'inline-flex':'none';
+  if(curCfg.summarize){$('bSummarize').style.display='inline-flex';$('bSummarize').lastChild.textContent='摘要'}else{$('bSummarize').style.display='none'}
   // 裝置資訊（可點按膠囊，靜音/恢復）— 檔案模式不顯示
   let _dvh='';
   if(!curCfg.isFile){
@@ -551,7 +564,46 @@ function conn(){const p=location.protocol==='https:'?'wss:':'ws:';const _wsUrl=p
   ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching)showSetup();else if(ev.type==='disconnected'){if(_isSwitching)return;dot.classList.remove('on');showDisconnected(ev.message||'主程式已結束')}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'')}}catch(x){}};
   ws.onclose=()=>{dot.classList.remove('on');if($('pLive').classList.contains('on')&&!_discShown){_discShown=true;showDisconnected('與伺服器的連線已中斷')}if(!rTimer)rTimer=setInterval(()=>{if(!ws||ws.readyState===WebSocket.CLOSED)conn()},3000)};ws.onerror=()=>ws.close()}
 // Tooltips
-const _tips={iSource:'選擇即時擷取系統音訊，或讀入音訊檔案進行離線處理',iMode:'選擇翻譯方向或轉錄語言。雙向模式需使用耳機',iAsrLoc:'GPU 伺服器辨識速度快；本機不需網路但較慢',iModel:'較大的模型準確度較高但速度較慢',iScene:'緩衝長度越長句子越完整，越短反應越即時',iEngine:'LLM 品質最好需伺服器，NLLB/Argos 為本機離線',iLlmHost:'Ollama 或 OpenAI 相容伺服器的 IP:Port',iLlmModel:'選擇 LLM 伺服器上的翻譯模型',testBtn:'測試 LLM 伺服器連線並載入可用模型清單',iDevice:'擷取電腦播放的聲音（BlackHole / WASAPI Loopback）',iMicDev:'擷取本機麥克風或耳機的輸入',iTopic:'填寫會議主題可提升翻譯的上下文準確度',iRec:'同時將音訊錄製為檔案，儲存於 recordings/ 目錄',iMic:'同時轉錄麥克風輸入（ASR 負載加倍）',iDenoise:'啟用背景降噪（適合嘈雜環境，安靜環境可不勾）',goBtn:'啟動即時辨識或離線處理',stopBtn:'停止目前的辨識工作（按兩次確認）',pauseBtn:'暫停或繼續辨識（快捷鍵 P）',subBtn:'切換對話模式與字幕模式（快捷鍵 T）'};
+const _tips={
+  // 輸入來源
+  iSource:'選擇即時擷取系統音訊，或讀入音訊檔案進行離線處理',
+  fileFilter:'輸入關鍵字篩選 recordings/ 目錄中的檔案',
+  uploadZone:'拖曳或點按上傳音訊/影片檔案到 recordings/ 目錄',
+  // 語音辨識
+  iMode:'選擇翻譯方向或轉錄語言。雙向模式建議使用耳麥',
+  iAsrLoc:'GPU 伺服器辨識速度快；本機不需網路但較慢',
+  iModel:'較大的模型準確度較高但速度較慢。標有「此裝置適合」的為推薦',
+  iScene:'緩衝長度越長句子越完整，越短反應越即時',
+  // 語言翻譯
+  iEngine:'LLM 品質最好需伺服器，NLLB/Argos 為本機離線',
+  iLlmHost:'Ollama 或 OpenAI 相容伺服器的 IP:Port',
+  iLlmModel:'選擇 LLM 伺服器上的翻譯模型',
+  testBtn:'測試 LLM 伺服器連線並載入可用模型清單',
+  // 音訊裝置
+  iDevice:'擷取電腦播放的聲音（macOS: BlackHole / Windows: WASAPI Loopback）',
+  iMicDev:'擷取本機麥克風或耳機的輸入',
+  // 離線處理選項
+  iDiarize:'啟用講者辨識，區分不同發言者（需 resemblyzer + spectralcluster）',
+  iNumSpk:'指定講者人數，0 為自動偵測（2~8 位）。已知人數時建議填入可提升精準度',
+  iSummarize:'離線處理完成後自動產生 AI 摘要（需 LLM 伺服器）',
+  iSumModel:'選擇摘要用的 LLM 模型，建議使用 120B 以上大模型',
+  iSumRounds:'LLM 產生摘要的次數。多次處理後整合可提升品質，避免單次結果異常',
+  // 其他設定
+  iTopic:'填寫會議主題與關鍵字，可提升翻譯與摘要的準確度',
+  iRec:'同時將音訊錄製為檔案，儲存於 recordings/ 目錄',
+  iMic:'同時轉錄麥克風輸入（ASR 負載加倍，需使用本機辨識）',
+  iDenoise:'啟用背景降噪（適合嘈雜環境，安靜環境可不勾）',
+  // 安全設定
+  iPwRead:'遠端觀看字幕用密碼。空白表示不需密碼即可觀看',
+  iPwAdmin:'遠端管理用密碼。空白表示不啟用遠端管理功能',
+  // 按鈕
+  goBtn:'啟動即時辨識或離線處理',
+  stopBtn:'停止目前的辨識工作（按兩次確認，快捷鍵 S）',
+  pauseBtn:'暫停或繼續辨識（快捷鍵 P）',
+  subBtn:'切換對話模式與字幕模式（快捷鍵 T）',
+  newBtn:'捲動到最新訊息',
+  tBtn:'切換淺色/深色主題',
+};
 Object.entries(_tips).forEach(([id,tip])=>{const el=$(id);if(el)el.title=tip});
 let _authToken='',_authRole='admin';
 function _authHeaders(){return _authToken?{'Content-Type':'application/json','X-Auth-Token':_authToken}:{'Content-Type':'application/json'}}
@@ -570,7 +622,9 @@ function _showAuthDialog(title,hint,showSkip){
     setTimeout(()=>inp.focus(),100);
   });
 }
-function togglePwVis(id,btn){const inp=$(id);if(inp.type==='password'){inp.type='text';btn.textContent='隱藏'}else{inp.type='password';btn.textContent='顯示'}}
+const _eyeOn='<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;vertical-align:middle"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+const _eyeOff='<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5;vertical-align:middle"><path d="M17.94 17.94A10.07 10.07 0 0112 20C5 20 1 12 1 12A18.45 18.45 0 015.06 6.06M9.9 4.24A9.12 9.12 0 0112 4C19 4 23 12 23 12A18.5 18.5 0 0119.18 16.76"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+function togglePwVis(id,btn){const inp=$(id);if(inp.type==='password'){inp.type='text';btn.innerHTML=_eyeOff}else{inp.type='password';btn.innerHTML=_eyeOn}}
 async function savePw(){
   const r=$('iPwRead').value.trim(),a=$('iPwAdmin').value.trim();
   try{const res=await fetch('/api/save-passwords',{method:'POST',headers:_authHeaders(),body:JSON.stringify({read:r,admin:a})});const d=await res.json();$('pwResult').innerHTML=d.ok?'<span style="color:var(--green)">已儲存</span>':'<span style="color:var(--red)">'+esc(d.error)+'</span>'}catch(e){$('pwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}

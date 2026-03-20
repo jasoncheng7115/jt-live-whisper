@@ -713,7 +713,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.14.4"
+APP_VERSION = "2.14.5"
 
 # ─── WebUI 暫停控制（SIGUSR1 toggle）──────────────────────────────
 _webui_pause_event = None  # 由各 streaming 函式設定
@@ -1917,12 +1917,31 @@ class NllbTranslator:
         self.direction = direction
         print(f"{C_DIM}正在載入 NLLB 離線翻譯模型...{RESET}", end=" ", flush=True)
         _webui_send({"type": "progress", "stage": "載入中", "detail": "NLLB 離線翻譯模型"})
-        self.sp = sentencepiece.SentencePieceProcessor()
-        self.sp.Load(os.path.join(NLLB_MODEL_DIR, "sentencepiece.bpe.model"))
-        self.ct2 = ctranslate2.Translator(
-            NLLB_MODEL_DIR, device="cpu", compute_type="int8"
-        )
-        print(f"{C_OK}{BOLD}完成！{RESET}")
+        # 檢查 config.json 是否存在（新版 ctranslate2 需要，舊模型可能缺少）
+        _cfg_path = os.path.join(NLLB_MODEL_DIR, "config.json")
+        if not os.path.exists(_cfg_path):
+            print(f"\n  {C_DIM}模型缺少 config.json，正在重新下載...{RESET}", end=" ", flush=True)
+            try:
+                from huggingface_hub import snapshot_download as _hf_dl
+                _hf_dl("JustFrederik/nllb-200-distilled-600M-ct2-int8",
+                       local_dir=NLLB_MODEL_DIR)
+                print(f"{C_OK}✓{RESET}")
+            except Exception as _e:
+                print(f"\n  {C_HIGHLIGHT}[警告] 自動修復失敗: {_e}{RESET}")
+        try:
+            self.sp = sentencepiece.SentencePieceProcessor()
+            self.sp.Load(os.path.join(NLLB_MODEL_DIR, "sentencepiece.bpe.model"))
+            self.ct2 = ctranslate2.Translator(
+                NLLB_MODEL_DIR, device="cpu", compute_type="int8"
+            )
+            print(f"{C_OK}{BOLD}完成！{RESET}")
+        except Exception as e:
+            print(f"\n{C_HIGHLIGHT}[錯誤] NLLB 模型載入失敗: {e}{RESET}", file=sys.stderr)
+            print(f"  {C_DIM}請刪除模型後重新安裝：{RESET}")
+            print(f"  {C_WHITE}rm -rf {NLLB_MODEL_DIR}{RESET}")
+            print(f"  {C_WHITE}{_INSTALL_CMD}{RESET}")
+            _webui_send({"type": "progress", "stage": "錯誤", "detail": f"NLLB 模型載入失敗: {e}"})
+            raise
 
     def _translate_short(self, text):
         """翻譯單句"""
@@ -8303,15 +8322,15 @@ class _SummaryStatusBar:
                         old_rows = self._last_rows
                         self._last_rows = rows
                         with self._lock:
-                            if old_rows and old_rows != rows:
-                                # 解除 scroll region，清除舊/新之間所有列的殘影
-                                buf = "\x1b[r"
-                                lo = min(old_rows, rows)
-                                hi = max(old_rows, rows)
-                                for r in range(lo, hi + 1):
-                                    buf += f"\x1b[{r};1H\x1b[2K"
-                                sys.stdout.write(buf)
+                            # 1. 解除 scroll region
+                            sys.stdout.write("\x1b[r")
+                            # 2. 清除舊 bar 位置和新 bar 位置
+                            if old_rows:
+                                sys.stdout.write(f"\x1b[{old_rows};1H\x1b[2K")
+                            sys.stdout.write(f"\x1b[{rows};1H\x1b[2K")
+                            # 3. 重設 scroll region（保留最後一行給 bar）
                             sys.stdout.write(f"\x1b[1;{rows - 1}r")
+                            # 4. 游標移到 scroll region 底部
                             sys.stdout.write(f"\x1b[{rows - 1};1H")
                             sys.stdout.flush()
                     except Exception:
@@ -9519,6 +9538,18 @@ def process_audio_file(input_path, mode, translator, model_size="large-v3-turbo"
                      "detail": f"{seg_count} 段{diarize_info} | {total_str}"})
         print(f"\n{C_DIM}{'═' * 60}{RESET}")
         print(f"  {C_OK}{BOLD}處理完成{RESET} {C_DIM}（共 {seg_count} 段{diarize_info} | 耗時 {total_str}）{RESET}")
+        if seg_count == 0:
+            _mode_lang = {"en2zh": "英文", "zh2en": "中文", "ja2zh": "日文", "zh2ja": "中文",
+                          "en": "英文", "zh": "中文", "ja": "日文",
+                          "en_zh": "英文/中文", "ja_zh": "日文/中文"}
+            _expected = _mode_lang.get(mode, mode)
+            print(f"  {C_HIGHLIGHT}[注意] 辨識結果為 0 段，可能原因：{RESET}")
+            print(f"  {C_HIGHLIGHT}  1. 功能模式選錯（目前: {mode}，期望音訊語言: {_expected}）{RESET}")
+            print(f"  {C_HIGHLIGHT}  2. 音訊檔內容為靜音或非語音{RESET}")
+            print(f"  {C_HIGHLIGHT}  3. 音訊品質太差，辨識引擎無法處理{RESET}")
+            print(f"  {C_DIM}  建議：確認音訊語言後選擇正確的功能模式重新處理{RESET}")
+            _webui_send({"type": "progress", "stage": "注意",
+                         "detail": f"辨識結果為 0 段，請確認功能模式是否正確（目前期望: {_expected}）"})
         print(f"  {C_WHITE}{log_path}{RESET}")
         if _html:
             print(f"  {C_WHITE}{_html}{RESET}")
@@ -10123,15 +10154,18 @@ def _fix_speaker_labels_in_text(text):
 
 def summarize_log_file(input_path, model, host, port, server_type="ollama",
                        topic=None, metadata=None, summary_mode="both",
-                       audio_path=""):
+                       audio_path="", summary_rounds=1):
     """讀取記錄檔 → 建 prompt → 呼叫 LLM → 簡繁轉換 → 寫摘要檔
     summary_mode: "both"（摘要+逐字稿）、"summary"（只摘要）、"transcript"（只逐字稿）
+    summary_rounds: 處理次數（1-3），多次處理後整合可提升品質
     回傳 (output_path, summary_text, html_path)"""
     with open(input_path, "r", encoding="utf-8") as f:
         transcript = f.read().strip()
 
     if not transcript:
         print(f"  {C_HIGHLIGHT}[跳過] 檔案內容為空: {input_path}{RESET}")
+        print(f"  {C_DIM}逐字稿為空表示辨識無結果，可能是功能模式與音訊語言不符{RESET}")
+        _webui_send({"type": "progress", "stage": "跳過摘要", "detail": "逐字稿為空，請確認功能模式是否正確"})
         return None, None, None
 
     basename = os.path.basename(input_path)
@@ -10318,6 +10352,95 @@ def summarize_log_file(input_path, model, host, port, server_type="ollama",
         # 將重點摘要放在前面，校正逐字稿放在後面
         summary = _retry_result.rstrip() + "\n\n" + summary.lstrip()
         print(f"  {C_OK}重點摘要已補上{RESET}")
+
+    # 偵測 LLM 是否跳過校正逐字稿（summary_mode="both" 時應有）
+    if summary_mode == "both" and "## 校正逐字稿" not in summary:
+        print(f"\n  {C_HIGHLIGHT}[偵測] LLM 回覆缺少校正逐字稿，自動補發校正請求...{RESET}")
+        _tc_input = transcript[:max_chars] if len(transcript) > max_chars else transcript
+        _tc_topic = f"（主題：{topic}）" if topic else ""
+        _tc_prompt = f"""\
+你是專業的會議記錄整理員。請將以下語音辨識的逐字稿整理成流暢、易讀的段落文字{_tc_topic}。
+合併斷句、修正錯字，保留原始語意，不要增刪內容。不需要保留時間戳記。
+必須完整輸出所有內容，嚴禁以「以下略」「篇幅限制」等理由截斷或跳過任何段落。
+全部使用台灣繁體中文。
+
+輸出格式：
+
+## 校正逐字稿
+
+（整理後的完整文字）
+
+以下是逐字稿：
+---
+{_tc_input}
+---"""
+        sbar_tc = _SummaryStatusBar(model=model, task="補產校正逐字稿", location=_llm_loc).start()
+        _tc_result = call_ollama_raw(_tc_prompt, model, host, port, spinner=sbar_tc,
+                                      live_output=True, server_type=server_type)
+        sbar_tc.stop()
+        _tc_result = S2TWP.convert(_tc_result)
+        summary = summary.rstrip() + "\n\n" + _tc_result.lstrip()
+        print(f"  {C_OK}校正逐字稿已補上{RESET}")
+
+    # 多次處理：重新產生摘要並整合（提升品質）
+    if summary_rounds > 1:
+        round_results = [summary]
+        for ri in range(2, min(summary_rounds, 3) + 1):
+            print(f"\n  {C_WHITE}第 {ri}/{summary_rounds} 次摘要處理...{RESET}")
+            _webui_send({"type": "progress", "stage": f"生成摘要（{model}）",
+                         "detail": f"第 {ri}/{summary_rounds} 次處理"})
+            sbar_r = _SummaryStatusBar(model=model, task=f"第 {ri} 次摘要", location=_llm_loc).start()
+            if len(chunks) <= 1:
+                _r_prompt = _summary_prompt(transcript, topic=topic, summary_mode=summary_mode)
+                _r_result = call_ollama_raw(_r_prompt, model, host, port, spinner=sbar_r,
+                                            live_output=False, server_type=server_type)
+            else:
+                _r_segs = []
+                for ci, chunk in enumerate(chunks):
+                    sbar_r.set_task(f"第 {ri} 次 - 段 {ci+1}/{len(chunks)}")
+                    _r_prompt = _summary_prompt(chunk, topic=topic, summary_mode=summary_mode)
+                    _r_seg = call_ollama_raw(_r_prompt, model, host, port, spinner=sbar_r,
+                                             live_output=False, server_type=server_type)
+                    _r_segs.append(S2TWP.convert(_r_seg))
+                sbar_r.set_task(f"第 {ri} 次 - 合併")
+                _r_combined = "\n\n---\n\n".join(
+                    f"### 第 {i+1} 段\n{s}" for i, s in enumerate(_r_segs))
+                _r_merge_prompt = SUMMARY_MERGE_PROMPT_TEMPLATE.format(summaries=_r_combined)
+                _r_result = call_ollama_raw(_r_merge_prompt, model, host, port, spinner=sbar_r,
+                                            live_output=False, server_type=server_type)
+            sbar_r.freeze()
+            sbar_r.stop()
+            round_results.append(S2TWP.convert(_r_result))
+        # 整合多次結果
+        print(f"\n  {C_WHITE}整合 {len(round_results)} 次摘要結果...{RESET}")
+        _webui_send({"type": "progress", "stage": f"生成摘要（{model}）",
+                     "detail": f"整合 {len(round_results)} 次結果"})
+        sbar_m = _SummaryStatusBar(model=model, task="整合摘要", location=_llm_loc).start()
+        # 整合時考慮 context window：每次結果截斷到 max_chars / 次數，確保總量不超限
+        _per_round_limit = max(max_chars // len(round_results), 2000)
+        _truncated_results = []
+        for i, r in enumerate(round_results):
+            if len(r) > _per_round_limit:
+                r = r[:_per_round_limit] + f"\n\n（第 {i+1} 次摘要過長，已截斷至 {_per_round_limit} 字）"
+            _truncated_results.append(r)
+        _merge_input = "\n\n" + "=" * 40 + "\n\n".join(
+            f"【第 {i+1} 次摘要】\n{r}" for i, r in enumerate(_truncated_results))
+        _merge_prompt = (
+            "以下是同一份會議逐字稿經過多次 AI 摘要處理的結果。"
+            "請整合這些摘要，取各版本的最佳內容，產出一份完整、準確、不遺漏的最終摘要。"
+            "如果某個版本有提到其他版本遺漏的重點，請納入。"
+            "如果有校正逐字稿，以最完整的版本為準。"
+            "全部使用台灣繁體中文。\n\n" + _merge_input
+        )
+        summary = call_ollama_raw(_merge_prompt, model, host, port, spinner=sbar_m,
+                                   live_output=True, server_type=server_type)
+        sbar_m.freeze()
+        sbar_m.stop()
+
+    # 標題格式修正（在所有補發和整合之後）：LLM 有時輸出 ### 或其他標題格式，統一修正
+    import re as _re_fmt
+    summary = _re_fmt.sub(r'#{2,4}\s*(?:最終)?(?:重點)?摘要', '## 重點摘要', summary)
+    summary = _re_fmt.sub(r'#{2,4}\s*(?:校正)?逐字稿', '## 校正逐字稿', summary)
 
     summary = S2TWP.convert(summary)
 
@@ -11606,6 +11729,9 @@ def parse_args():
         "--summary-model", metavar="MODEL", default=SUMMARY_DEFAULT_MODEL,
         help=f"摘要用的 LLM 模型 (預設 {SUMMARY_DEFAULT_MODEL})")
     parser.add_argument(
+        "--summary-rounds", type=int, metavar="N", default=1,
+        help="摘要處理次數（1-3，多次處理後整合可提升品質，預設 1）")
+    parser.add_argument(
         "--diarize", action="store_true",
         help="講者辨識（需搭配 --input，用 resemblyzer + spectralcluster）")
     parser.add_argument(
@@ -12219,12 +12345,14 @@ def main():
                     except Exception:
                         pass
                 try:
+                    _sum_rounds = getattr(args, 'summary_rounds', 1) or 1
                     out_path, _, html_path = summarize_log_file(lp, summary_model, host, port,
                                                                   server_type=server_type,
                                                                   topic=meeting_topic,
                                                                   metadata=_meta,
                                                                   summary_mode=summary_mode,
-                                                                  audio_path=audio_in_session)
+                                                                  audio_path=audio_in_session,
+                                                                  summary_rounds=_sum_rounds)
                     if out_path:
                         if html_path:
                             html_to_open.append(html_path)
@@ -12427,6 +12555,10 @@ def main():
                 _retry_result = S2TWP.convert(_retry_result)
                 summary = _retry_result.rstrip() + "\n\n" + summary.lstrip()
                 print(f"  {C_OK}重點摘要已補上{RESET}")
+
+            # 標題格式修正
+            summary = re.sub(r'#{2,4}\s*(?:最終)?(?:重點)?摘要', '## 重點摘要', summary)
+            summary = re.sub(r'#{2,4}\s*(?:校正)?逐字稿', '## 校正逐字稿', summary)
 
             summary = S2TWP.convert(summary)
 
