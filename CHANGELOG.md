@@ -1,5 +1,12 @@
 # Changelog
 
+### v2.14.6 (2026-03-20)
+
+**修正**
+- install.ps1 nvidia-smi 偵測強化：新增 SysNative 路徑（修正 32-bit PowerShell 下 WoW64 目錄重定向問題）
+- install.ps1 GPU 偵測 fallback：當 nvidia-smi 不在 PATH 時，透過 where.exe、驅動安裝路徑（WMI InstalledDisplayDrivers）、登錄檔（NvSmi）三種額外方式搜尋
+- 修正 Developer PowerShell for VS 等非標準環境下有 NVIDIA GPU + CUDA 卻安裝 CPU 版 PyTorch 的問題
+
 ### v2.14.5 (2026-03-20)
 
 **改進**
