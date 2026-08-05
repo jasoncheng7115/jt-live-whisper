@@ -196,7 +196,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.18.1 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.18.2 - 100% 全地端 AI 語音工具集 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -338,6 +338,38 @@ check_homebrew() {
 }
 
 # ─── Brew packages ───────────────────────────────
+# ── SDL2 偵測（能力導向，不比對 formula 名稱）────────────────────────────
+# Homebrew 自 2026 起 sdl2 已成為 sdl2-compat 的別名：SDL2 API 跑在 SDL3 之上，
+# brew list --formula 只會顯示 sdl2-compat。whisper.cpp 也只有 WHISPER_SDL2 選項
+# （沒有 WHISPER_SDL3），而 sdl2-compat 提供完整的 SDL2 headers、sdl2.pc 與
+# lib/cmake/SDL2/sdl2-config.cmake，find_package(SDL2) 找得到，可直接使用。
+# 因此改成偵測「SDL2 API 有沒有到位」，而不是「裝了哪個 formula」。
+_sdl2_prefixes() {
+    local p
+    p=$(brew --prefix 2>/dev/null) && [ -n "$p" ] && echo "$p"
+    echo "/opt/homebrew"
+    echo "/usr/local"
+}
+
+_sdl2_available() {
+    pkg-config --exists sdl2 2>/dev/null && return 0
+    local p
+    for p in $(_sdl2_prefixes); do
+        [ -f "$p/lib/cmake/SDL2/sdl2-config.cmake" ] && return 0
+        [ -f "$p/lib/pkgconfig/sdl2.pc" ] && return 0
+    done
+    brew list --formula 2>/dev/null | grep -qE "^(sdl2|sdl2-compat)$" && return 0
+    return 1
+}
+
+_sdl2_kind() {
+    if brew list --formula 2>/dev/null | grep -q "^sdl2-compat$"; then
+        echo "sdl2-compat，SDL2 API on SDL3"
+    else
+        echo "sdl2"
+    fi
+}
+
 install_brew_formula() {
     local pkg="$1"
     local desc="$2"
@@ -392,19 +424,16 @@ install_brew_cask() {
 check_brew_deps() {
     section "系統套件 (Homebrew)"
     install_brew_formula "cmake" "CMake 建構工具"
-    # SDL 音訊函式庫：優先 SDL2（whisper.cpp 目前使用），未來 SDL3 可用時自動切換
-    if brew list --formula 2>/dev/null | grep -q "^sdl2$"; then
-        check_ok "SDL2 音訊函式庫 (sdl2)"
-    elif brew list --formula 2>/dev/null | grep -q "^sdl3$"; then
-        check_ok "SDL3 音訊函式庫 (sdl3)"
-        echo -e "  ${C_WARN}[注意]${NC} whisper.cpp 尚未正式支援 SDL3，若編譯失敗請安裝 SDL2: brew install sdl2"
+    # SDL2 音訊函式庫（whisper.cpp 的 whisper-stream 需要）
+    # 注意：Homebrew 自 2026 起把 sdl2 變成 sdl2-compat 的別名（SDL2 API 跑在 SDL3 之上），
+    # brew list 會顯示 sdl2-compat 而不是 sdl2，所以不能只比對 formula 名稱。
+    if _sdl2_available; then
+        check_ok "SDL2 音訊函式庫（$(_sdl2_kind)）"
     else
-        # 兩者都沒有，嘗試安裝 SDL2
         install_brew_formula "sdl2" "SDL2 音訊函式庫"
-        # SDL2 安裝失敗時嘗試 SDL3（未來 Homebrew 可能只有 SDL3）
-        if ! brew list --formula 2>/dev/null | grep -q "^sdl2$"; then
-            echo -e "  ${C_WARN}[備選]${NC} SDL2 安裝失敗，嘗試安裝 SDL3..."
-            install_brew_formula "sdl3" "SDL3 音訊函式庫"
+        if ! _sdl2_available; then
+            check_fail "SDL2 安裝後仍偵測不到，whisper.cpp 的即時辨識將無法編譯"
+            echo -e "  ${C_DIM}可手動安裝：brew install sdl2（現會安裝 sdl2-compat）${NC}"
         fi
     fi
     install_brew_formula "ffmpeg" "FFmpeg 音訊轉檔工具"
@@ -573,16 +602,16 @@ check_whisper_cpp() {
             fi
         fi
 
-        # 偵測 SDL 版本（優先 SDL2，未來相容 SDL3）
+        # whisper.cpp 只有 WHISPER_SDL2 這個選項，沒有 WHISPER_SDL3。
+        # 傳入未知的 -DWHISPER_SDL3=ON 時 cmake 不會報錯，只會安靜地建出
+        # 沒有 whisper-stream 的版本，接著在 --target whisper-stream 才爆
+        # 「No rule to make target」，因此這裡一律用 SDL2（sdl2-compat 亦適用）。
         local sdl_cmake_flag="-DWHISPER_SDL2=ON"
-        local sdl_prefix=""
-        if brew list --formula 2>/dev/null | grep -q "^sdl2$"; then
-            sdl_cmake_flag="-DWHISPER_SDL2=ON"
-            echo -e "  ${C_DIM}使用 SDL2${NC}"
-        elif brew list --formula 2>/dev/null | grep -q "^sdl3$"; then
-            # whisper.cpp 未來可能用 -DWHISPER_SDL3=ON，先嘗試
-            sdl_cmake_flag="-DWHISPER_SDL3=ON"
-            echo -e "  ${C_WARN}使用 SDL3（實驗性）${NC}"
+        if _sdl2_available; then
+            echo -e "  ${C_DIM}使用 SDL2（$(_sdl2_kind)）${NC}"
+        else
+            echo -e "  ${C_WARN}偵測不到 SDL2，whisper-stream 可能無法編譯${NC}"
+            echo -e "  ${C_DIM}請先執行：brew install sdl2${NC}"
         fi
 
         # 偵測架構
@@ -591,9 +620,13 @@ check_whisper_cpp() {
         local cmake_extra_flags=""
         if [ "$arch" = "arm64" ]; then
             # Apple Silicon: ARM Homebrew + Metal
-            if [ -d "/opt/homebrew/Cellar/sdl2" ] || [ -d "/opt/homebrew/Cellar/sdl3" ]; then
-                cmake_extra_flags="-DCMAKE_OSX_ARCHITECTURES=arm64 -DWHISPER_METAL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.5-a+fp16 -DCMAKE_PREFIX_PATH=/opt/homebrew"
-            fi
+            # 注意 1：Metal 與架構旗標不可綁在「SDL 目錄是否存在」之下——改用
+            #   sdl2-compat 後 /opt/homebrew/Cellar/sdl2 不會存在，整組加速旗標
+            #   會被跳過，建出沒有 Metal 的版本
+            # 注意 2：prefix 固定寫 /opt/homebrew，不能用 $(brew --prefix)——
+            #   同時裝了 Intel Homebrew 時 brew --prefix 可能回傳 /usr/local，
+            #   arm64 建置吃到 x86_64 的函式庫會失敗
+            cmake_extra_flags="-DCMAKE_OSX_ARCHITECTURES=arm64 -DWHISPER_METAL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ARM_ARCH=armv8.5-a+fp16 -DCMAKE_PREFIX_PATH=/opt/homebrew"
         elif [ "$arch" = "x86_64" ]; then
             # Intel Mac: Homebrew 在 /usr/local，不啟用 Metal（Intel Mac 用 AVX 加速）
             cmake_extra_flags="-DCMAKE_OSX_ARCHITECTURES=x86_64 -DGGML_METAL=OFF -DCMAKE_PREFIX_PATH=/usr/local"

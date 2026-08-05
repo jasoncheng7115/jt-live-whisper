@@ -1,5 +1,18 @@
 # Changelog
 
+### v2.18.2 (2026-08-05)
+
+**修正 — macOS 安裝時 whisper.cpp 編譯失敗：`No rule to make target 'whisper-stream'`**（[issue #2](https://github.com/jasoncheng7115/jt-live-whisper/issues/2)，感謝 @jackylinuxcom 回報並提供修正方向）
+- 症狀：新版 macOS 執行 `./install.sh` 時，whisper.cpp 編譯階段報 `make: *** No rule to make target 'whisper-stream'. Stop.`
+- 根因：**Homebrew 已把 `sdl2` 變成 `sdl2-compat` 的別名**（SDL2 API 跑在 SDL3 之上），`brew list --formula` 只會顯示 `sdl2-compat`。安裝腳本用 `grep "^sdl2$"` 比對 formula 名稱因此比不到，落到 SDL3 分支
+- 一併修掉同一段落的另外兩個問題：
+  - **whisper.cpp 根本沒有 `WHISPER_SDL3` 這個選項**（只有 `WHISPER_SDL2`）。傳入未知選項時 cmake 不會報錯，只會安靜地建出沒有 `whisper-stream` 的版本，直到 `--target whisper-stream` 才爆錯——這就是錯誤訊息看起來與 SDL 無關的原因
+  - **Metal 加速旗標被綁在「`/opt/homebrew/Cellar/sdl2` 目錄是否存在」條件下**。改用 sdl2-compat 後該目錄不存在，整組 `-DWHISPER_METAL=ON -DGGML_CPU_ARM_ARCH=...` 會被跳過，就算編譯成功也是沒有 Metal 加速的版本
+- 修法：偵測改為**能力導向**而非比對 formula 名稱——依序檢查 `pkg-config --exists sdl2`、各 Homebrew prefix 下的 `lib/cmake/SDL2/sdl2-config.cmake` 與 `lib/pkgconfig/sdl2.pc`，最後才回退到 formula 名稱（同時接受 `sdl2` 與 `sdl2-compat`）。如此不論 Homebrew 日後怎麼改名都能正確偵測
+- 編譯旗標一律使用 `-DWHISPER_SDL2=ON`；Metal 旗標不再依賴 SDL 目錄是否存在
+- 實測：`sdl2-compat` 提供完整 SDL2 headers、`sdl2.pc` 與 `lib/cmake/SDL2/`，`find_package(SDL2)` 可正常找到（回報 SDL2_FOUND=1、version 2.32.70），`-DWHISPER_SDL2=ON` 能正確建出 arm64 的 `whisper-stream`
+
+
 ### v2.18.1 (2026-07-29)
 
 **修正 — LLM 翻譯偶爾輸出簡體字時沒有任何機制攔截**

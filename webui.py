@@ -476,7 +476,7 @@ def _get_config():
         "recommended_models": recommended_models,
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
-        "last": last, "version": "2.18.1",
+        "last": last, "version": "2.18.2",
         "has_read_pw": bool(_webui_passwords["read"]),
         "has_admin_pw": bool(_webui_passwords["admin"]),
     }

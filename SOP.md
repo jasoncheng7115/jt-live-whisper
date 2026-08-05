@@ -1,6 +1,6 @@
 # jt-live-whisper 安裝與使用 SOP
 
-即時英翻中字幕系統 v2.18.1 (by Jason Cheng)
+即時英翻中字幕系統 v2.18.2 (by Jason Cheng)
 
 | **目錄** | [系統架構](#一系統架構) · [音訊設定](#二事前準備音訊設定) · [安裝程式](#三安裝程式) · [啟動與使用](#四啟動與使用) · [使用流程總結](#五使用流程總結) · [常見問題](#六常見問題) · [檔案說明](#七檔案說明) · [硬體建議](#硬體建議) |
 |---|---|
@@ -381,7 +381,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 |---|---|
 | [Homebrew](https://brew.sh/) | macOS 套件管理器（需事先安裝，安裝腳本不會自動安裝） |
 | cmake | 編譯工具 |
-| sdl2 | 音訊擷取函式庫 |
+| sdl2 | 音訊擷取函式庫（whisper.cpp 即時辨識用；新版 Homebrew 會安裝 `sdl2-compat`，安裝腳本兩者皆支援） |
 | ffmpeg | 音訊轉檔工具（--input 離線處理需要） |
 | Xcode Command Line Tools | 提供 swiftc，用於編譯 ScreenCaptureKit 擷取元件（未安裝時執行 `xcode-select --install`） |
 | bin/jt-sck-audio | ScreenCaptureKit 系統音訊擷取元件（安裝時自動編譯，約一分鐘） |
