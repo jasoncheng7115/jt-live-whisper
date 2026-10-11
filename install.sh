@@ -217,7 +217,7 @@ spinner_stop() {
 print_title() {
     echo ""
     echo -e "${C_TITLE}============================================================${NC}"
-    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
+    echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.29.0 - 100% 全地端 AI 語音工具箱 - 安裝程式${NC}"
     echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
     echo -e "${C_TITLE}============================================================${NC}"
     echo ""
@@ -1648,7 +1648,7 @@ jtdt_meeting/transcript_parse.py jtdt_meeting/zip_guard.py \
 jtlw_api/__init__.py jtlw_api/__main__.py jtlw_api/app.py jtlw_api/config.py jtlw_api/engine.py \
 jtlw_api/events.py jtlw_api/keys.py jtlw_api/log.py jtlw_api/store.py jtlw_api/tls.py \
 jtlw_api/schemas/jtlw-api-v1.schema.json \
-jtlw_tts/__init__.py jtlw_tts/__main__.py jtlw_tts/engine.py jtlw_tts/tw_reading.py jtlw_tts/interp.py \
+jtlw_tts/__init__.py jtlw_tts/__main__.py jtlw_tts/engine.py jtlw_tts/tw_reading.py jtlw_tts/interp.py jtlw_tts/vmic.py \
 jtlw_tts/voices/b00000000001/voice.json jtlw_tts/voices/b00000000001/ref.wav \
 jtlw_tts/voices/b00000000002/voice.json jtlw_tts/voices/b00000000002/ref.wav \
 jtlw_tts/voices/b00000000003/voice.json jtlw_tts/voices/b00000000003/ref.wav \

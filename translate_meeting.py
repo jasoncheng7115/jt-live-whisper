@@ -619,7 +619,7 @@ def _force_exit(code=0):
     # 結束懸浮字幕子程序（os._exit 不會觸發 atexit）
     global _overlay_proc_ref
     _webui_flush()                      # os._exit 也不會跑 atexit 的送完事件
-    if _interp_modules:                 # 雙向口譯在 Linux 建的虛擬麥克風（atexit 不會跑，第二次 Ctrl+C／WebUI 強制停止走這裡）
+    if _interp_modules or _interp_vmic:  # 雙向口譯建的虛擬麥克風（atexit 不會跑，第二次 Ctrl+C／WebUI 強制停止走這裡）
         try:
             _interp_linux_cleanup()
         except Exception:
@@ -2517,7 +2517,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.28.1"
+APP_VERSION = "2.29.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -11953,10 +11953,14 @@ def _tts_open_stream(dev, sr):
 # 排程與回授過濾在 jtlw_tts/interp.py；這裡是裝置、合成與接到雙向模式
 _INTERP_MODES = ("en_zh",)
 # 念給對方聽要把英文送進會議軟體的麥克風：要有虛擬麥克風（2026-10-10 使用者決定）。
-# macOS 安裝 BlackHole 2ch（GPL-3.0，免費）；Linux 程式自動建立；Windows 暫不支援（常見的虛擬音效卡是捐贈軟體、公司使用要付費，
-# 授權不合適；開放原始碼的驅動要開測試簽章模式才裝得起來）
+# macOS 安裝 BlackHole 2ch（GPL-3.0，免費）；Linux 程式自動建立；
+# Windows（v2.29.0）：安裝 usbip-win2（開放原始碼 BSD-2-Clause，核心驅動由微軟簽署），程式自己當一支 USB 麥克風（jtlw_tts/vmic.py）。
+# 常見的虛擬音效卡是捐贈軟體、公司使用要付費，授權不合適；其他開放原始碼的音訊驅動要開測試簽章模式才裝得起來
 _INTERP_MAC_NEED = "需要先安裝 BlackHole 2ch（免費，GPL-3.0）：brew install --cask blackhole-2ch，裝完重新開機；會議軟體的麥克風改選「BlackHole 2ch」"
-_INTERP_WIN_NO = "Windows 暫不支援「念給對方聽」（需要虛擬麥克風，目前沒有授權合適的方案），可以先用「念給我聽」"
+_INTERP_WIN_MIC = "jt-live-whisper Interpreter Mic"
+_INTERP_WIN_NEED = ("需要先安裝 usbip-win2（免費、開放原始碼，驅動由微軟簽署）：在安裝資料夾執行 .\\install.ps1 -InterpMic；"
+                    "之後開始時自動建立「" + _INTERP_WIN_MIC + "」，會議軟體的麥克風改選它")
+_INTERP_WIN_READY = "開始時自動建立「" + _INTERP_WIN_MIC + "」（usbip-win2）：會議軟體的麥克風改選它，結束後記得改回來"
 _INTERP_SINK = "jtlw_interp"                 # Linux --speak-them auto 自動建立的虛擬裝置（結束時移除）
 _INTERP_SRC = "jtlw_interp_mic"
 _interp_modules = []                         # 自己載入（或接手上一次留下）的 PulseAudio 模組編號
@@ -12001,15 +12005,23 @@ def _interp_linux_sink():
 
 
 def _interp_linux_cleanup():
-    """移除虛擬麥克風。WebUI 切換裝置（重新啟動主程式）時保留給新的程式接手（.webui_interp_keep，60 秒內寫的才算）：
+    """移除虛擬麥克風（Linux 的 PulseAudio 模組、Windows 的口譯麥克風）。
+    WebUI 切換裝置（重新啟動主程式）時保留給新的程式接手（.webui_interp_keep，60 秒內寫的才算）：
     移除的話會議軟體會改用實體麥克風，新的建好之後也不會自己切回來，對方就聽到原聲而不是英文。回傳是不是保留了"""
     import subprocess as sp
     try:
-        if _interp_modules and time.time() - os.path.getmtime(_INTERP_KEEP_FILE) < 60:
-            _interp_modules.clear()
-            return True
+        keep = (_interp_modules or _interp_vmic) and time.time() - os.path.getmtime(_INTERP_KEEP_FILE) < 60
     except OSError:
-        pass
+        keep = False
+    while _interp_vmic:
+        # Windows：保留＝只關伺服器，usbip-win2 會一直重試、新的程式起來就接回同一個接口（同一支裝置）
+        try:
+            _interp_vmic.pop().close(keep=bool(keep))
+        except Exception:
+            pass
+    if keep:
+        _interp_modules.clear()
+        return True
     while _interp_modules:
         m = _interp_modules.pop()
         try:
@@ -12017,6 +12029,42 @@ def _interp_linux_cleanup():
         except (OSError, sp.SubprocessError):
             pass
     return False
+
+
+_interp_vmic = []                            # Windows：這一場建立的口譯麥克風（jtlw_tts.vmic.WinVirtualMic）
+
+
+def _interp_win_ready():
+    """Windows 能不能自動建立口譯麥克風（裝了 usbip-win2）"""
+    if not IS_WINDOWS:
+        return False
+    try:
+        from jtlw_tts import vmic
+    except Exception:                            # 從舊版第一次升級拿不到 vmic.py
+        return False
+    return vmic.usbip_installed()
+
+
+def _interp_win_mic():
+    """Windows：建立口譯麥克風（usbip-win2＋本機的 USB 麥克風伺服器）。回 (物件, 錯誤)。
+    結束時一定移除：雙向模式的收尾、_force_exit、atexit；WebUI 切換裝置時留給新的程式接手（_interp_linux_cleanup）"""
+    if _interp_vmic:
+        return _interp_vmic[0], None
+    try:
+        from jtlw_tts import vmic
+    except Exception as e:
+        return None, f"口譯麥克風元件不完整（{type(e).__name__}: {e}）：請再執行一次升級"
+    if not vmic.usbip_installed():
+        return None, _INTERP_WIN_NEED
+    m = vmic.WinVirtualMic()
+    err = m.start()
+    if err:
+        return None, err
+    _interp_vmic.append(m)
+    if not _interp_atexit[0]:
+        _interp_atexit[0] = True
+        atexit.register(_interp_linux_cleanup)
+    return m, None
 
 
 def _interp_find_device(spec):
@@ -12038,9 +12086,11 @@ def _interp_find_device(spec):
             return ("sd", i), None
         return None, f"沒有編號 {i} 的播放裝置（--tts-list 列出全部）"
     if spec.lower() == "auto":
+        if IS_WINDOWS:
+            m, err = _interp_win_mic()
+            return (None, err) if err else (("vmic", m), None)
         if not IS_LINUX:
-            return None, ("auto 只有 Linux（自動建立虛擬麥克風）。" + (_INTERP_MAC_NEED + "，再用 --speak-them \"BlackHole\" 指定"
-                                                                       if IS_MACOS else _INTERP_WIN_NO))
+            return None, ("auto 只有 Linux 與 Windows（自動建立虛擬麥克風）。" + _INTERP_MAC_NEED + "，再用 --speak-them \"BlackHole\" 指定")
         err = _interp_linux_sink()
         return (None, err) if err else (("pulse", _INTERP_SINK), None)
     if IS_LINUX:
@@ -12076,7 +12126,8 @@ def _resample_pcm(pcm, sr, osr):
 
 
 class _InterpAudio:
-    """每個方向一個播放裝置：sounddevice 的 RawOutputStream，或 Linux 的 pacat（指定 PulseAudio 裝置）"""
+    """每個方向一個播放裝置：sounddevice 的 RawOutputStream、Linux 的 pacat（指定 PulseAudio 裝置）、
+    或 Windows 的口譯麥克風（vmic：每個方向一個聲道，在麥克風裡混音）"""
 
     def __init__(self, devices, pause_ev=None):
         self.devices = devices                     # {lane: (種類, 值)}
@@ -12086,6 +12137,9 @@ class _InterpAudio:
 
     def _open(self, lane, sr):
         kind, val = self.devices[lane]
+        if kind == "vmic":
+            from jtlw_tts import vmic
+            return vmic.Feeder(val.mic, lane), vmic.RATE
         if kind == "pulse":
             import subprocess as sp
             p = sp.Popen(["pacat", "--playback", f"--device={val}", "--format=s16le", f"--rate={sr}", "--channels=1",
@@ -12103,7 +12157,9 @@ class _InterpAudio:
         if osr != sr:
             pcm = _resample_pcm(pcm, sr, osr)
         try:
-            if hasattr(obj, "stdin"):
+            if hasattr(obj, "sink"):                # Windows 的口譯麥克風：照真實時間送，大約念完才回來（跟喇叭一樣）
+                obj.write(pcm, self.pause_ev)
+            elif hasattr(obj, "stdin"):
                 while self.pause_ev.is_set():
                     time.sleep(0.1)
                 # pacat 不會等播完：照時間軸等到這段快播完（留一點緩衝，段與段之間才不會斷）。
@@ -12127,7 +12183,9 @@ class _InterpAudio:
             return
         obj = cur[0]
         try:
-            if hasattr(obj, "stdin"):
+            if hasattr(obj, "sink"):
+                pass                                # 麥克風本身由 _interp_linux_cleanup 收
+            elif hasattr(obj, "stdin"):
                 obj.stdin.close()
                 obj.wait(timeout=3)
             else:
@@ -12219,8 +12277,9 @@ def _interp_build(args, mode, pause_ev=None):
         # v2.27.0 的伺服器不認得 lang=en：英文句子會套台灣念法、數字念成中文，念給對方聽一定錯
         return None, (f"GPU 伺服器的版本太舊（{health.get('version') or '不明'}），念不對英文：念給對方聽要 v2.28.0 以上的伺服器"
                       "（設定了自動更新密鑰會自己更新，否則請在 GPU 伺服器更新 server.py）")
-    if args.speak_them and IS_WINDOWS:
-        return None, _INTERP_WIN_NO
+    if args.speak_them and IS_WINDOWS and str(args.speak_them).strip().lower() != "auto":
+        # Windows 只用自己的口譯麥克風：其他常見的虛擬音效卡授權不合適（2026-10-10 使用者決定），喇叭則會念給自己聽
+        return None, "Windows 的念給對方聽請用 --speak-them auto（自動建立「" + _INTERP_WIN_MIC + "」）"
     lanes, devices = {}, {}
     for lane, dev, vid, rate, lang in ((I.ME, args.speak_me, args.speak_me_voice, args.speak_me_rate, "zh"),
                                        (I.THEM, args.speak_them, args.speak_them_voice, args.speak_them_rate, "en")):
@@ -12329,7 +12388,8 @@ def _ask_interp(args, mode):
     if IS_MACOS:
         print(f"  {C_HIGHLIGHT}念給對方聽{_INTERP_MAC_NEED}{RESET}")
     elif IS_WINDOWS:
-        print(f"  {C_HIGHLIGHT}{_INTERP_WIN_NO}{RESET}")
+        win_ok = _interp_win_ready()
+        print(f"  {C_HIGHLIGHT}念給對方聽：{_INTERP_WIN_READY if win_ok else _INTERP_WIN_NEED}{RESET}")
     if not _ask_yes("是否開啟語音口譯？", False):
         return
     devs = _tts_output_devices()
@@ -12339,8 +12399,10 @@ def _ask_interp(args, mode):
             args.speak_me = _ask_pick("念給我聽：播放裝置（耳機）", items, 0, "系統預設")
         else:
             args.speak_me = "default"
-    if not IS_WINDOWS and _ask_yes("念給對方聽（我的中文 → 英文，送進虛擬麥克風）？", False):
-        if IS_LINUX:
+    if (not IS_WINDOWS or win_ok) and _ask_yes("念給對方聽（我的中文 → 英文，送進虛擬麥克風）？", False):
+        if IS_WINDOWS:
+            args.speak_them = "auto"
+        elif IS_LINUX:
             import subprocess as sp
             try:
                 sinks = [l.split("\t")[1] for l in sp.run(["pactl", "list", "short", "sinks"], capture_output=True,
@@ -18066,7 +18128,8 @@ def parse_args():
                     help="對方說的英文翻成中文後念給我聽：播放裝置（default＝系統預設、裝置編號或名稱的一部分；請用耳機）")
     ip.add_argument("--speak-them", metavar="DEV", default=None,
                     help="我說的中文翻成英文後念給對方聽：輸出到虛擬麥克風，會議軟體的麥克風改選它。macOS 要先安裝 BlackHole 2ch"
-                         "（brew install --cask blackhole-2ch）再指定 \"BlackHole\"；Linux 用 auto 自動建立；Windows 暫不支援")
+                         "（brew install --cask blackhole-2ch）再指定 \"BlackHole\"；Linux 用 auto 自動建立；"
+                         "Windows 先安裝 usbip-win2（.\\install.ps1 -InterpMic），再用 auto 自動建立「jt-live-whisper Interpreter Mic」")
     ip.add_argument("--speak-me-voice", metavar="ID", default=None, help="念給我聽的聲音（預設：朗讀的預設聲音）")
     ip.add_argument("--speak-them-voice", metavar="ID", default=None, help="念給對方聽的聲音（預設：內建英文聲音；--tts-list 列出）")
     ip.add_argument("--speak-me-rate", type=float, default=1.0, metavar="R", help="念給我聽的語速（0.5～2，預設 1；不是 1 時不用串流合成）")

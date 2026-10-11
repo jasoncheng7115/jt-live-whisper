@@ -1580,7 +1580,7 @@ function interpFill(info,L){
   const me=ds.map(d=>({value:String(d.id),label:'['+d.id+'] '+d.name,tag:''}));me.unshift({value:'default',label:'系統預設'+(def?'（'+def.name+'）':''),tag:''});
   cselSetItems($('iInterpMeDev'),me);cselSetValue($('iInterpMeDev'),me.some(i=>i.value===L.interp_me_dev)?L.interp_me_dev:'default');
   const them=ds.map(d=>({value:String(d.id),label:'['+d.id+'] '+d.name,tag:vre.test(d.name)?'虛擬裝置':''}));
-  if(info.interp_auto_sink)them.unshift({value:'auto',label:'自動建立虛擬麥克風',tag:'Linux'});
+  if(info.interp_auto_sink)them.unshift({value:'auto',label:'自動建立虛擬麥克風',tag:info.interp_auto_tag||'Linux'});
   if(!info.interp_auto_sink&&!ds.some(d=>vre.test(d.name)))them.unshift({value:'',label:'沒有偵測到虛擬麥克風',tag:'',disabled:true});
   cselSetItems($('iInterpThemDev'),them);const vd=ds.find(d=>vre.test(d.name));
   cselSetValue($('iInterpThemDev'),them.some(i=>i.value===L.interp_them_dev&&!i.disabled)?L.interp_them_dev:(info.interp_auto_sink?'auto':(vd?String(vd.id):'')));
@@ -1588,10 +1588,10 @@ function interpFill(info,L){
   cselSetItems($('iInterpMeVoice'),zh);cselSetValue($('iInterpMeVoice'),zh.some(i=>i.value===L.interp_me_voice)?L.interp_me_voice:(info.voice||''));
   cselSetItems($('iInterpThemVoice'),null,(en.length?[{label:'英文聲音',items:en}]:[]).concat([{label:'台灣華語聲音（念英文有口音）',items:zh}]));
   cselSetValue($('iInterpThemVoice'),en.concat(zh).some(i=>i.value===L.interp_them_voice)?L.interp_them_voice:(info.en_voice||info.voice||''));
-  /* 念給對方聽要有虛擬麥克風：macOS 標示要先裝 BlackHole（偵測到就顯示已偵測到）、Windows 暫不支援（反灰）、Linux 自動建立 */
+  /* 念給對方聽要有虛擬麥克風：macOS 標示要先裝 BlackHole（偵測到就顯示已偵測到）、Windows 沒裝 usbip-win2 時反灰並說明、Linux 與裝好的 Windows 自動建立 */
   const it=info.interp_them||{},ne=$('iInterpThemNeed');
   if(it.supported===false){ne.className='ip-need no';ne.textContent=it.note||'';L=Object.assign({},L,{interp_them:false});$('iInterpThem').disabled=true}
-  else{$('iInterpThem').disabled=false;ne.className='ip-need '+(it.auto||it.found?'ok':'warn');ne.textContent=it.auto?(it.note||''):it.found?(it.found_note||''):'念給對方聽'+(it.need||'')}
+  else{$('iInterpThem').disabled=false;ne.className='ip-need '+(it.warn?'warn':(it.auto||it.found?'ok':'warn'));ne.textContent=it.auto?(it.note||''):it.found?(it.found_note||''):'念給對方聽'+(it.need||'')}
   $('iInterpMe').checked=!!L.interp_me;$('iInterpThem').checked=!!L.interp_them;$('iInterpIntro').checked=L.interp_intro!==false;$('iInterpPass').checked=!!L.interp_passthrough;interpVis()}
 function interpBody(b){if($('rInterp').style.display==='none')return true;
   b.interp_me=$('iInterpMe').checked;b.interp_them=$('iInterpThem').checked;b.interp_intro=$('iInterpIntro').checked;b.interp_passthrough=$('iInterpPass').checked;

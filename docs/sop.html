@@ -138,7 +138,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.28.1 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.29.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3184,7 +3184,7 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 </thead>
 <tbody><tr>
 <td>macOS</td>
-<td><strong>要先安裝 BlackHole 2ch</strong>（免費，GPL-3.0）：<code>brew install --cask blackhole-2ch</code>，需要管理者密碼，裝完重新開機</td>
+<td><strong>要先安裝 BlackHole 2ch</strong>（免費，GPL-3.0）：<code>brew install --cask blackhole-2ch</code>，需要管理者密碼，裝完重新開機。系統音訊用 ScreenCaptureKit 時，jt-live-whisper 自己念出的聲音不會被錄回去（實測）</td>
 <td>BlackHole 2ch</td>
 </tr>
 <tr>
@@ -3194,25 +3194,65 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 </tr>
 <tr>
 <td>Windows</td>
-<td><strong>暫不支援</strong>：目前沒有授權合適的虛擬麥克風（常見的虛擬音效卡是捐贈軟體、公司使用要付費；開放原始碼的驅動要開測試簽章模式才裝得起來）。可以用「念給我聽」</td>
-<td>不適用</td>
+<td><strong>要先安裝 usbip-win2</strong>（v2.29.0 起；免費、開放原始碼 BSD-2-Clause，核心驅動由微軟簽署）：在安裝資料夾執行 <code>.\install.ps1 -InterpMic</code>。之後選「自動建立虛擬麥克風」（命令列 <code>--speak-them auto</code>），開始時建立、結束時移除</td>
+<td>jt-live-whisper Interpreter Mic</td>
 </tr>
 </tbody></table>
-<p>WebUI 的「念給對方聽」下方會顯示這台要裝什麼：macOS 偵測不到 BlackHole 時黃色提示、偵測到時綠色；Windows 反灰並說明。</p>
+<p>WebUI 的「念給對方聽」下方會顯示這台要裝什麼：macOS 偵測不到 BlackHole 時黃色提示、偵測到時綠色；Windows 沒裝 usbip-win2 時反灰並說明怎麼裝，裝了就跟 Linux 一樣「自動建立虛擬麥克風」。</p>
+<p><strong>Windows 的口譯麥克風</strong>（v2.29.0 起）：</p>
 <ul>
-<li><strong>請戴耳機</strong>：念給你聽的中文從喇叭出來的話，會被麥克風收進去</li>
-<li>結束後<strong>把會議軟體的麥克風改回原本的麥克風</strong>，否則對方聽不到你（停止時畫面也會提醒）</li>
-<li>第一次念給對方聽之前，先念一句「Hi, I&#39;m using an AI interpreter, so there will be a short delay.」讓對方知道有延遲、是 AI 合成的聲音（可以關掉或改文字）</li>
-<li>預設對方只聽到英文；勾「同時送出我的原聲」（命令列 <code>--passthrough</code>）的話，你的原聲也會送進虛擬麥克風，念英文時原聲自動調小到約四分之一。WebUI 把麥克風靜音時原聲也不送</li>
+<li>原理：jt-live-whisper 在本機（127.0.0.1）假裝成一支 USB 麥克風，usbip-win2 把它接成這台電腦的 USB 裝置，Windows 用內建的 USB 音訊驅動認它。我們沒有另外的驅動，不需要測試簽章</li>
+<li><code>.\install.ps1 -InterpMic</code>：下載固定版本（usbip-win2 0.9.8.1），核對 SHA256 與發行者的數位簽章（Cloudyne Systems）都對才安裝；要系統管理員權限（會跳「使用者帳戶控制」）。<strong>安裝時 USB 3 集線器會重新啟動，USB 鍵盤、滑鼠、耳機會斷線幾秒，請不要在會議中安裝</strong>。完整安裝（<code>.\install.ps1</code>）結束時也會問一次（預設否），升級不問</li>
+<li>安裝程式建議重新開機；實測不重開也能用。開始時如果說「沒有接上口譯麥克風」，請重新開機一次</li>
+<li>只提供自己的口譯麥克風：已經裝了別的虛擬音效卡也不提供（常見的幾套是捐贈軟體、公司使用要付費）</li>
+<li><strong>Windows 會把新接上的 USB 麥克風自動設成預設麥克風</strong>：jt-live-whisper 會馬上改回原本的預設（一般與通訊兩種），會議軟體選「預設」的不會被換成口譯麥克風</li>
+<li>口譯麥克風由背景的小程式負責（<code>jtlw_tts\vmic.py --serve</code>，只聽本機 127.0.0.1），主程式停止時一起結束；
+WebUI 中途切換裝置時它留著給重新啟動的主程式接手，<strong>麥克風不會消失</strong>，會議軟體不用改；主程式意外結束的話，60 秒後自己拔掉並結束</li>
+<li>公司電腦請先問 IT：裝了 usbip-win2 之後，這台電腦上的程式都能叫它連到網路上的 USB/IP 伺服器（作者說明的設計取捨）</li>
+<li>移除：Windows「設定」&gt;「應用程式」&gt;「已安裝的應用程式」&gt; USBip</li>
+</ul>
+<h5>智慧型應用程式控制（Smart App Control）</h5>
+<p>Windows 11 的「智慧型應用程式控制」設為<strong>開啟</strong>時，會擋下沒有數位簽章、而且微軟不認得的程式與程式庫（設為「評估」或「關閉」的電腦不受影響）。
+usbip-win2 0.9.8.1 的命令列工具 <code>usbip.exe</code> 要載入兩個<strong>沒有數位簽章</strong>的程式庫（<code>libusbip.dll</code>、<code>resources.dll</code>），可能被擋。</p>
+<p><strong>jt-live-whisper 怎麼避開</strong>（v2.29.0 起）：</p>
+<ul>
+<li><strong>直接跟 usbip-win2 的驅動溝通，不執行 <code>usbip.exe</code></strong>：驅動（<code>usbip2_ude</code>）由微軟簽署；我們用 Windows 自己的系統程式庫與 Python 內建的 ctypes 對驅動下「掛上、拔掉、列出、停止重試」四個指令，那兩個沒簽章的程式庫根本不會載入。
+只有驅動回應的格式跟預期不同（usbip-win2 之後的版本改了介面）時，才改用 <code>usbip.exe</code></li>
+<li>口譯麥克風的背景小程式只用 Python 本身（混音不需要 numpy）</li>
+<li>安裝檔有發行者的數位簽章（Cloudyne Systems，EV 憑證），<code>.\install.ps1 -InterpMic</code> 檢查的是「驅動在不在、正不正常」，命令列工具被擋不影響</li>
+<li>安裝程式與 WebUI 會先看這台是哪一種；開啟時說明上面這些</li>
+</ul>
+<p><strong>仍然建立不起來時</strong>（開始口譯時說「掛載失敗」或「沒有接上口譯麥克風」，後面附上「這台電腦開啟了智慧型應用程式控制」）：</p>
+<ul>
+<li><p><strong>查看設定</strong>：Windows 安全性 &gt; 應用程式與瀏覽器控制 &gt; 智慧型應用程式控制設定</p>
+</li>
+<li><p>微軟<strong>沒有提供個別放行</strong>（不能只允許某個程式），只能把這個功能<strong>整個關閉</strong>（同一頁）。關閉會降低防護，公司電腦請先問 IT</p>
+<ul>
+<li>依微軟說明，2026 年 4 月起的 Windows 11 更新（24H2 組建 26100.8116、25H2 組建 26200.8116 以後）關閉後還能再開啟；<strong>更早的版本關閉後要重設或重灌 Windows 才能再開</strong>，關之前先到「設定 &gt; Windows Update」更新</li>
+<li>不想關閉的話：雙向口譯只用「念給我聽」；念給對方聽可以在 macOS（BlackHole）或 Linux（自動建立）上用</li>
+</ul>
+</li>
+<li><p>智慧型應用程式控制也可能擋下 Python 套件裡其他沒有簽章的程式庫（不只口譯），整個 jt-live-whisper 都會受影響；那時的錯誤訊息會附上處理方式</p>
+</li>
+<li><p>我們的測試機是「評估」，直接跟驅動溝通的方式與 <code>usbip.exe</code> 備援都實測正常；「開啟」的情形沒有實機測過（在舊版 Windows 開了就關不回來）</p>
+</li>
+<li><p><strong>請戴耳機</strong>：念給你聽的中文從喇叭出來的話，會被麥克風收進去</p>
+</li>
+<li><p>結束後<strong>把會議軟體的麥克風改回原本的麥克風</strong>，否則對方聽不到你（停止時畫面也會提醒）</p>
+</li>
+<li><p>第一次念給對方聽之前，先念一句「Hi, I&#39;m using an AI interpreter, so there will be a short delay.」讓對方知道有延遲、是 AI 合成的聲音（可以關掉或改文字）</p>
+</li>
+<li><p>預設對方只聽到英文；勾「同時送出我的原聲」（命令列 <code>--passthrough</code>）的話，你的原聲也會送進虛擬麥克風，念英文時原聲自動調小到約四分之一。WebUI 把麥克風靜音時原聲也不送</p>
+</li>
 </ul>
 <h4 id="操作">操作</h4>
 <p>WebUI：輸入來源「即時音訊擷取」、功能模式「英中雙向」，下面多一區「語音口譯」：勾「念給我聽」選耳機與聲音、勾「念給對方聽」選虛擬麥克風與聲音，按「開始」。
 字幕每一句標口譯狀態（排隊、念出中、已念、略過、失敗）；給對方、還沒念到的句子旁邊有「取消」；底部兩個方向各有一個靜音鈕（只停語音，字幕照常）。</p>
-<p>互動選單：選「英中雙向」、場景之後問「是否開啟語音口譯？」（預設否），接著問念給我聽的播放裝置、念給對方聽送到哪裡（macOS 預選 BlackHole 2ch，偵測不到就說明怎麼裝、這次只念給你聽；Linux 預設自動建立；Windows 不問念給對方聽）、開場說明、要不要同時送出原聲，聲音用預設。GPU 伺服器沒有文字轉語音時不問。</p>
+<p>互動選單：選「英中雙向」、場景之後問「是否開啟語音口譯？」（預設否），接著問念給我聽的播放裝置、念給對方聽送到哪裡（macOS 預選 BlackHole 2ch，偵測不到就說明怎麼裝、這次只念給你聽；Linux 預設自動建立；Windows 裝了 usbip-win2 才問、自動建立，沒裝就說明怎麼裝）、開場說明、要不要同時送出原聲，聲音用預設。GPU 伺服器沒有文字轉語音時不問。</p>
 <p>命令列：</p>
 <pre><code class="language-bash">./start.sh --mode en_zh --speak-me default --speak-them &quot;BlackHole 2ch&quot;     # macOS（先安裝 BlackHole 2ch）
 ./start.sh --mode en_zh --speak-me default --speak-them auto                # Linux
-.\start.ps1 --mode en_zh --speak-me default                                 # Windows（只念給我聽）
+.\start.ps1 --mode en_zh --speak-me default --speak-them auto               # Windows（先執行一次 .\install.ps1 -InterpMic）
 </code></pre>
 <p><code>--speak-me-voice</code>／<code>--speak-them-voice</code> 選聲音（<code>--tts-list</code> 列出），<code>--speak-me-rate</code>／<code>--speak-them-rate</code> 調語速，<code>--interp-intro none</code> 不念開場說明，<code>--passthrough</code> 同時送出原聲。</p>
 <h4 id="聲音">聲音</h4>
@@ -3243,7 +3283,7 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 <li>只做線上會議（每個人戴耳機）；實體會議室（喇叭外放、同一個空間）不適合</li>
 <li>合成只在 GPU 伺服器（Apple Silicon Mac 本機合成的速度只夠一個方向，不提供）；念給對方聽要 v2.28.0 以上的 GPU 伺服器（舊的念不對英文，開始時會說明）</li>
 <li>對方跟念給你聽的中文同時說話時，那一段錄音如果被判斷成中文就整段不辨識，字幕會少那幾秒</li>
-<li>WebUI 中途切換裝置會重新啟動：還沒念完的句子標「已停止」；Linux 自動建立的虛擬麥克風會保留，會議軟體不用改</li>
+<li>WebUI 中途切換裝置會重新啟動：還沒念完的句子標「已停止」；Linux、Windows 自動建立的虛擬麥克風會保留，會議軟體不用改</li>
 </ul>
 <h2 id="五rest-api給其他系統串接">五、REST API（給其他系統串接）</h2>
 <p>要讓別的系統送音檔進來、取回逐字稿、講者標記與會議摘要時，啟用 REST API（<code>jtlw_api/</code>）。

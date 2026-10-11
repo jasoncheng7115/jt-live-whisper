@@ -1,4 +1,4 @@
-# jt-live-whisper v2.28.1
+# jt-live-whisper v2.29.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要、台灣華語朗讀，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -218,7 +218,7 @@ WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文�
 > **事前準備：念給對方聽要有「虛擬麥克風」**（會議軟體只能從麥克風收聲音）
 > - **macOS：要先安裝 [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)**（免費，GPL-3.0）：`brew install --cask blackhole-2ch`，需要管理者密碼、裝完重新開機；會議軟體的麥克風改選「BlackHole 2ch」
 > - **Linux**：不用安裝，程式自動建立、結束時移除
-> - **Windows：暫不支援念給對方聽**（目前沒有授權合適的虛擬麥克風），可以用「念給我聽」
+> - **Windows（v2.29.0 起）：要先安裝 usbip-win2**（免費、開放原始碼 BSD-2-Clause，驅動由微軟簽署）：在安裝資料夾執行 `.\install.ps1 -InterpMic`（會跳「使用者帳戶控制」；安裝時 USB 鍵盤、滑鼠、耳機會斷線幾秒，請不要在會議中安裝）。之後選「自動建立虛擬麥克風」，開始時建立「jt-live-whisper Interpreter Mic」、結束時移除；會議軟體的麥克風改選它。Windows 11 的「智慧型應用程式控制」：jt-live-whisper 直接跟 usbip-win2 的驅動（微軟簽署）溝通，不載入它沒有簽章的程式庫，通常不受影響；仍然被擋時的處理方式見 SOP 4-16
 >
 > 「念給我聽」三個平台都不用另外安裝。
 
@@ -232,8 +232,9 @@ WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文�
 - 開啟：WebUI「英中雙向」即時模式的「語音口譯」區；互動選單選「英中雙向」時會問；或命令列
 
 ```bash
-# 英中雙向＋語音口譯：中文念到耳機、英文送到虛擬麥克風（Linux 用 auto 自動建立）
+# 英中雙向＋語音口譯：中文念到耳機、英文送到虛擬麥克風（Linux、Windows 用 auto 自動建立）
 ./start.sh --mode en_zh --speak-me default --speak-them "BlackHole 2ch"
+.\start.ps1 --mode en_zh --speak-me default --speak-them auto     # Windows（先執行一次 .\install.ps1 -InterpMic）
 ```
 
 &nbsp;
@@ -735,7 +736,7 @@ cd C:\jt-live-whisper
 | `--local-asr` | 強制使用本機辨識（忽略 GPU 伺服器設定） | |
 | `--restart-server` | 強制重啟 GPU 伺服器 | |
 | `--speak-me DEV` | 雙向語音口譯：對方的英文翻成中文後念給我聽（`default`、裝置編號或名稱的一部分；請用耳機）。搭配 `--mode en_zh` | |
-| `--speak-them DEV` | 雙向語音口譯：我的中文翻成英文後念進虛擬麥克風（macOS 先安裝 BlackHole 2ch 再指定 `BlackHole`；Linux 用 `auto` 自動建立；Windows 暫不支援） | |
+| `--speak-them DEV` | 雙向語音口譯：我的中文翻成英文後念進虛擬麥克風（macOS 先安裝 BlackHole 2ch 再指定 `BlackHole`；Linux 用 `auto` 自動建立；Windows 先執行 `.\install.ps1 -InterpMic` 安裝 usbip-win2，再用 `auto`） | |
 | `--speak-me-voice ID`／`--speak-them-voice ID` | 兩個方向各自的聲音（`--tts-list` 列出；念給對方聽預設用內建的英文聲音） | |
 | `--speak-me-rate R`／`--speak-them-rate R` | 兩個方向各自的語速（不是 1 時不用串流合成） | `1` |
 | `--interp-intro TEXT` | 第一次念給對方聽之前的開場說明，`none` 不念 | `Hi, I'm using an AI interpreter, so there will be a short delay.` |

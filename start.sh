@@ -29,7 +29,7 @@ _COLS=$(tput cols 2>/dev/null || echo 60)
 [ "$_COLS" -lt 40 ] && _COLS=40
 _LINE=$(printf '%*s' "$_COLS" '' | tr ' ' '=')
 echo -e "${C_TITLE}${_LINE}${NC}"
-echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱${NC}"
+echo -e "${C_TITLE}${BOLD}  jt-live-whisper v2.29.0 - 100% 全地端 AI 語音工具箱${NC}"
 echo -e "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 echo -e "${C_TITLE}${_LINE}${NC}"
 echo ""

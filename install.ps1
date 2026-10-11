@@ -8,12 +8,15 @@
 .EXAMPLE
     .\install.ps1
     .\install.ps1 -Upgrade
+.EXAMPLE
+    .\install.ps1 -InterpMic    # 只安裝 usbip-win2（雙向口譯「念給對方聽」的口譯麥克風）
 .NOTES
     Author: Jason Cheng (Jason Tools)
 #>
 
 param(
-    [switch]$Upgrade
+    [switch]$Upgrade,
+    [switch]$InterpMic
 )
 
 Set-StrictMode -Version Latest
@@ -595,6 +598,160 @@ function offer_breezy_on_upgrade() {
     rw_offer_breezy $opts "$user@$($rw.host)" $true
 }
 
+# ─── 口譯麥克風：usbip-win2（v2.29.0，選用）─────────────────────
+# 雙向口譯「念給對方聽」要把英文送進會議軟體的麥克風。jt-live-whisper 自己當一支 USB 麥克風（jtlw_tts/vmic.py），
+# 靠 usbip-win2（開放原始碼 BSD-2-Clause；安裝程式由 Cloudyne Systems 以 EV 憑證簽署、核心驅動由微軟簽署）接成本機裝置。
+# 固定版本＋SHA256（跟 GitHub 發行頁的 digest 相同）＋簽署者，三樣都對才安裝。
+# 完整安裝時問一次（預設否）、升級不問；-InterpMic 直接安裝。沒有人可以回答就不問
+$USBIP_VER = "0.9.8.1"
+$USBIP_FILES = @{
+    "x64"   = @{ name = "USBip-0.9.8.1-x64.exe";   sha256 = "38cad6d4432b52d5bb9409d9ad03b72fdffc4ada4cd3a48fbeca1a2752a8518a" }
+    "arm64" = @{ name = "USBip-0.9.8.1-arm64.exe"; sha256 = "cab7ff97f79275eeb5c5b8bb2eb3111ff6b6c4eead07d9bec9be5bd1e3a35800" }
+}
+$USBIP_SIGNER = "CN=Cloudyne Systems (Scheibling Consulting AB)"
+
+# 智慧型應用程式控制：on／eval／off／""（讀不到）。usbip-win2 有兩個程式庫沒有簽章，「開啟」時可能被擋
+function sac_state {
+    try {
+        $v = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -Name VerifiedAndReputablePolicyState -ErrorAction Stop).VerifiedAndReputablePolicyState
+        switch ([int]$v) { 0 { return "off" } 1 { return "on" } 2 { return "eval" } }
+    } catch { }
+    return ""
+}
+
+# usbip-win2 的驅動（USBip 3.X Emulated Host Controller）在而且正常：jt-live-whisper 直接跟驅動溝通，不需要 usbip.exe
+function usbip_driver_ok {
+    try {
+        $d = @(Get-PnpDevice -PresentOnly -ErrorAction Stop | Where-Object { $_.FriendlyName -match 'USBip.*Host Controller' -and "$($_.Status)" -eq 'OK' })
+        return ($d.Count -gt 0)
+    } catch {
+        return $false
+    }
+}
+
+# usbip.exe 真的跑得起來（程式庫被擋的話這裡就失敗；只是備援，跑不起來不影響）
+function usbip_runs([string]$exe) {
+    try {
+        $null = & $exe --version 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function sac_explain {
+    Write-Host "  ${C_WARN}這台電腦開啟了「智慧型應用程式控制」：usbip-win2 的命令列工具有兩個程式庫（libusbip.dll、resources.dll）沒有數位簽章，可能被擋${NC}"
+    Write-Host "  ${C_DIM}  jt-live-whisper 直接跟 usbip-win2 的驅動（微軟簽署）溝通，不用那個命令列工具，所以通常不受影響${NC}"
+    Write-Host "  ${C_DIM}  仍然建立不起來時見手冊 4-16「智慧型應用程式控制」（微軟沒有個別放行，只能整個關閉；不關的話改用「念給我聽」）${NC}"
+}
+
+function usbip_exe_path {
+    foreach ($base in @($env:ProgramW6432, $env:ProgramFiles, "C:\Program Files")) {
+        if ($base) {
+            $p = Join-Path $base "USBip\usbip.exe"
+            if (Test-Path $p) { return $p }
+        }
+    }
+    return $null
+}
+
+# 下載的檔案對不對：SHA256 與簽署者都要對（只看「簽章有效」不夠：任何人都買得到有效的憑證）
+function usbip_installer_ok([string]$path, [string]$sha256) {
+    if (-not (Test-Path $path)) { return "找不到下載的檔案" }
+    $h = (Get-FileHash -Algorithm SHA256 -Path $path).Hash.ToLower()
+    if ($h -ne $sha256) { return "SHA256 不符（$h）" }
+    $sig = Get-AuthenticodeSignature -FilePath $path
+    if ("$($sig.Status)" -ne "Valid") { return "數位簽章無效（$($sig.Status)）" }
+    $subj = if ($sig.SignerCertificate) { "$($sig.SignerCertificate.Subject)" } else { "" }
+    if (-not (($subj -split ', ') -contains $USBIP_SIGNER)) {
+        return "簽署者不是預期的 Cloudyne Systems（$subj）"
+    }
+    return ""
+}
+
+function install_usbip_win2 {
+    section "口譯麥克風（usbip-win2 $USBIP_VER）"
+    $exe = usbip_exe_path
+    if ($exe) {
+        if (-not (usbip_driver_ok)) {
+            check_fail "usbip-win2 的驅動沒有在執行（裝置管理員找不到正常的「USBip 3.X Emulated Host Controller」）：請重新開機；還是不行就重新安裝"
+            return $false
+        }
+        check_ok "usbip-win2 已安裝：$exe（雙向口譯「念給對方聽」選「自動建立虛擬麥克風」）"
+        if (-not (usbip_runs $exe)) {
+            info "usbip-win2 的命令列工具執行不了（不影響：jt-live-whisper 直接跟驅動溝通）"
+            if ((sac_state) -eq "on") { sac_explain }
+        }
+        return $true
+    }
+    if ((sac_state) -eq "on") { sac_explain }
+    $arch = if ("$env:PROCESSOR_ARCHITECTURE" -eq "ARM64") { "arm64" } else { "x64" }
+    $f = $USBIP_FILES[$arch]
+    $url = if ($env:JTLW_USBIP_URL) { $env:JTLW_USBIP_URL } else { "https://github.com/vadimgrn/usbip-win2/releases/download/v.$USBIP_VER/$($f.name)" }
+    $tmp = Join-Path ([System.IO.Path]::GetTempPath()) $f.name
+    info "下載 $($f.name)（約 25 MB）..."
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
+    } catch {
+        check_fail "下載失敗：$($_.Exception.Message)"
+        return $false
+    }
+    $why = usbip_installer_ok $tmp $f.sha256
+    if ($why) {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        check_fail "下載的安裝檔沒有通過檢查，不安裝：$why"
+        return $false
+    }
+    check_ok "安裝檔檢查通過（SHA256、Cloudyne Systems 的數位簽章）"
+    Write-Host "  ${C_WARN}安裝驅動要系統管理員權限：接下來會跳出「使用者帳戶控制」，請按「是」${NC}"
+    Write-Host "  ${C_WARN}安裝時 USB 3 集線器會重新啟動，USB 鍵盤、滑鼠、耳機會斷線幾秒（請不要在會議中安裝）${NC}"
+    try {
+        $p = Start-Process -FilePath $tmp -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Verb RunAs -Wait -PassThru
+        $rc = $p.ExitCode
+    } catch {
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        check_fail "沒有安裝（$($_.Exception.Message)）"
+        return $false
+    }
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+    $exe = usbip_exe_path
+    if (-not $exe) {
+        check_fail "usbip-win2 沒有安裝完成（結束碼 $rc）"
+        return $false
+    }
+    for ($i = 0; $i -lt 15 -and -not (usbip_driver_ok); $i++) { Start-Sleep -Seconds 1 }   # 驅動剛裝好要幾秒才起來
+    if (-not (usbip_driver_ok)) {
+        check_fail "usbip-win2 裝好了，但驅動還沒有在執行：請重新開機一次（安裝程式也建議重開機）"
+        return $false
+    }
+    check_ok "usbip-win2 安裝完成"
+    if (-not (usbip_runs $exe)) {
+        info "usbip-win2 的命令列工具執行不了（不影響：jt-live-whisper 直接跟驅動溝通）"
+        if ((sac_state) -eq "on") { sac_explain }
+    }
+    info "雙向口譯「念給對方聽」選「自動建立虛擬麥克風」；會議軟體的麥克風改選「jt-live-whisper Interpreter Mic」"
+    info "移除：Windows 設定 > 應用程式 > 已安裝的應用程式 > USBip"
+    return $true
+}
+
+function offer_interp_mic {
+    if ([Console]::IsInputRedirected) { return }
+    if ($env:JTLW_UPGRADE_QUIET) { return }
+    if (usbip_exe_path) { return }
+    section "口譯麥克風（選用）"
+    Write-Host "  ${C_WHITE}雙向口譯「念給對方聽」：把你的中文翻成英文，經「口譯麥克風」送進 Teams、Zoom、Meet${NC}"
+    Write-Host "  ${C_DIM}  需要安裝 usbip-win2（免費、開放原始碼，驅動由微軟簽署；約 25 MB、要系統管理員權限）${NC}"
+    Write-Host "  ${C_DIM}  安裝時 USB 鍵盤、滑鼠、耳機會斷線幾秒；不用口譯的話不必安裝，之後要裝：.\install.ps1 -InterpMic${NC}"
+    if ((sac_state) -eq "on") { sac_explain }
+    $ans = Read-Host "  是否安裝口譯麥克風？(y/N)"
+    if ("$ans" -notmatch '^[Yy]') {
+        info "跳過（之後要裝：.\install.ps1 -InterpMic）"
+        return
+    }
+    $null = install_usbip_win2
+}
+
 # ─── Banner ───────────────────────────────────────────────────
 
 $cols = try { $Host.UI.RawUI.WindowSize.Width } catch { 60 }
@@ -604,7 +761,7 @@ $banner_line = '=' * $cols
 if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.28.1 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.29.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -615,6 +772,11 @@ Write-Host ""
 # ═══════════════════════════════════════════════════════════════
 # Upgrade 模式
 # ═══════════════════════════════════════════════════════════════
+
+if ($InterpMic) {
+    $ok = install_usbip_win2
+    if ($ok) { exit 0 } else { exit 1 }
+}
 
 if ($Upgrade) {
     # 升級要更新的檔案清單（與 install.sh 的 _UPGRADE_FILES 一致）。
@@ -634,7 +796,7 @@ if ($Upgrade) {
                        "jtlw_api/keys.py","jtlw_api/log.py","jtlw_api/store.py","jtlw_api/tls.py",
                        "jtlw_api/schemas/jtlw-api-v1.schema.json",
                        # 文字轉語音（v2.27.0）：第一次 -Upgrade 跑舊腳本、拿不到，第二次才會到
-                       "jtlw_tts/__init__.py","jtlw_tts/__main__.py","jtlw_tts/engine.py","jtlw_tts/tw_reading.py","jtlw_tts/interp.py",
+                       "jtlw_tts/__init__.py","jtlw_tts/__main__.py","jtlw_tts/engine.py","jtlw_tts/tw_reading.py","jtlw_tts/interp.py","jtlw_tts/vmic.py",
                        # 內建聲音（2026-10-09，8 個，VoxCPM2 依文字描述產生、不是真人錄音）
                        "jtlw_tts/voices/b00000000001/voice.json","jtlw_tts/voices/b00000000001/ref.wav",
                        "jtlw_tts/voices/b00000000002/voice.json","jtlw_tts/voices/b00000000002/ref.wav",
@@ -3186,6 +3348,7 @@ Write-Host "  ${C_DIM}提示：若日後將此資料夾搬移到其他位置，�
 Write-Host "  ${C_DIM}      安裝程式會自動偵測並修復因路徑變更而損壞的環境${NC}"
 Write-Host ""
 offer_desktop_shortcut
+offer_interp_mic
 Write-Host ""
 Write-Host "  ${C_DIM}安裝 log: $INSTALL_LOG${NC}"
 Write-Host ""

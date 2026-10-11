@@ -146,13 +146,17 @@ try:
     _KO_INPUT_MODES as _TM_KO_MODES,
     _tts_output_devices as _tm_tts_output_devices,
     _INTERP_MAC_NEED as _TM_INTERP_MAC_NEED,
-    _INTERP_WIN_NO as _TM_INTERP_WIN_NO,
+    _INTERP_WIN_NEED as _TM_INTERP_WIN_NEED,
+    _INTERP_WIN_READY as _TM_INTERP_WIN_READY,
+    _interp_win_ready as _tm_interp_win_ready,
     _INTERP_VIRTUAL as _TM_INTERP_VIRTUAL,
 )
 except Exception:
     _tm_tts_output_devices = None
     _TM_INTERP_MAC_NEED = "需要先安裝 BlackHole 2ch"
-    _TM_INTERP_WIN_NO = "Windows 暫不支援「念給對方聽」"
+    _TM_INTERP_WIN_NEED = "需要先安裝 usbip-win2"
+    _TM_INTERP_WIN_READY = "開始時自動建立口譯麥克風"
+    _tm_interp_win_ready = None
     _TM_INTERP_VIRTUAL = re.compile(r"blackhole|virtual", re.I)
     _tm_parse_llm_host = None
     _TM_TRANSLATE_MODELS = [("gemma4:26b", "速度快、品質好（推薦，約需 17GB）"),
@@ -1056,7 +1060,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.28.1",
+        "last": last, "version": "2.29.0",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2,
@@ -1848,8 +1852,16 @@ def _tts_fail(e):
     return JSONResponse({"ok": False, "error": e.message, "code": e.code}, status_code=e.status)
 
 
+def _interp_win_ready():
+    try:
+        return bool(_tm_interp_win_ready and _tm_interp_win_ready())
+    except Exception:
+        return False
+
+
 def _interp_them_info(devices):
-    """念給對方聽在這台能不能用、要先裝什麼（v2.28.0，2026-10-10 使用者：「要特別標示需要安裝 blackhole」、Windows 暫不支援）。
+    """念給對方聽在這台能不能用、要先裝什麼（v2.28.0，2026-10-10 使用者：「要特別標示需要安裝 blackhole」）。
+    Windows（v2.29.0）：裝了 usbip-win2 就跟 Linux 一樣自動建立；沒裝時反灰、說明怎麼裝。
     說明文字用主程式那一份（命令列、互動選單、WebUI 同一句話）"""
     if sys.platform.startswith("linux"):
         return {"supported": True, "auto": True, "note": "Linux 自動建立虛擬麥克風，不用安裝"}
@@ -1857,7 +1869,18 @@ def _interp_them_info(devices):
         return {"supported": True, "auto": False, "need": _TM_INTERP_MAC_NEED,
                 "found": any(_TM_INTERP_VIRTUAL.search(d.get("name") or "") for d in devices),
                 "found_note": "已偵測到 BlackHole 2ch：會議軟體的麥克風改選「BlackHole 2ch」，結束後記得改回來"}
-    return {"supported": False, "note": _TM_INTERP_WIN_NO}
+    if _interp_win_ready():
+        try:
+            from jtlw_tts import vmic
+            sac = vmic.win_sac_state() == "on"
+        except Exception:
+            sac = False
+        if sac:                                   # 智慧型應用程式控制開著：我們直接跟驅動溝通、不載入 usbip-win2 沒簽章的程式庫，通常不受影響
+            return {"supported": True, "auto": True, "note": _TM_INTERP_WIN_READY + "（這台開啟了「智慧型應用程式控制」：jt-live-whisper "
+                    "直接跟 usbip-win2 的驅動溝通，通常不受影響；建立不起來時見手冊 4-16）"}
+        return {"supported": True, "auto": True, "note": _TM_INTERP_WIN_READY}
+    # 沒裝 usbip-win2：反灰並說明怎麼裝。已經有別的虛擬音效卡也不提供（常見的那幾套授權不合適，2026-10-10 使用者決定）
+    return {"supported": False, "note": _TM_INTERP_WIN_NEED}
 
 
 def _tts_info(admin, refresh=False):
@@ -1888,7 +1911,8 @@ def _tts_info(admin, refresh=False):
            "voices": voices, "voice": _tts.default_voice_id(cfg),
            # 雙向語音口譯（v2.28.0）：念英文給對方聽的聲音、Linux 可以自動建立虛擬麥克風
            "en_voices": [_tts.public_voice(v) for v in _tts.list_voices("en")], "en_voice": _tts.default_en_voice_id(),
-           "interp_auto_sink": sys.platform.startswith("linux"),
+           "interp_auto_sink": sys.platform.startswith("linux") or _interp_win_ready(),
+           "interp_auto_tag": "Linux" if sys.platform.startswith("linux") else "Windows",
            "interp_them": _interp_them_info(devices),
            "provider": s["provider"], "mac_steps": s["mac_steps"], "genders": _tts.GENDERS,
            "pauses": list(_tts.PAUSES), "rate_range": [_tts.RATE_MIN, _tts.RATE_MAX],
