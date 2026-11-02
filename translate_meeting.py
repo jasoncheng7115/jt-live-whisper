@@ -2748,7 +2748,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.31.8"
+APP_VERSION = "2.32.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -13100,6 +13100,127 @@ def _tts_wait_browser(job, target, sess, pause_ev, stall):
         time.sleep(0.2)
 
 
+def _tts_state_path(save_wav):
+    """存檔進度：跟音訊檔放一起（.朗讀_時間.state.json），每寫完一段更新；正常結束就刪掉"""
+    d, b = os.path.split(save_wav)
+    b = b[:-len(".part.wav")] if b.endswith(".part.wav") else os.path.splitext(b)[0]
+    return os.path.join(d, (b if b.startswith(".") else "." + b) + ".state.json")
+
+
+def _tts_state_write(path, state):
+    try:
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+_TTS_ORPHAN_SEC = 600         # 舊版留下的 .part.wav 沒有進度檔：10 分鐘沒動才當成中斷
+
+
+def _tts_recover_interrupted(ffmpeg=None):
+    """上次朗讀（邊播邊存）中途當掉、被強制結束時，把留下的音訊收成看得到的檔案。
+
+    MP3 是全部念完才從 WAV 轉的，中斷就只剩隱藏的 .朗讀_時間.part.wav（裡面的段落都完整、檔頭也是最新的）；
+    WAV 本身就是正式檔，只要告訴使用者它沒念完。寫檔的程式還在的不動（同一台開兩份）。
+    回傳 [(檔案, 已存段數或 None, 總段數或 None, 秒數)]"""
+    try:
+        names = os.listdir(RECORDING_DIR)
+    except OSError:
+        return []
+    out = []
+    states = {}
+    for nm in names:
+        if nm.startswith(".朗讀_") and nm.endswith(".state.json"):
+            try:
+                with open(os.path.join(RECORDING_DIR, nm), encoding="utf-8") as f:
+                    states[nm] = json.load(f)
+            except (OSError, ValueError):
+                states[nm] = {}
+    parts = [nm for nm in names if nm.startswith(".朗讀_") and nm.endswith(".part.wav")]
+    for nm, st in states.items():
+        wav = st.get("wav") or ""
+        if wav and wav not in parts and not wav.startswith("."):
+            parts.append(wav)                      # 存 WAV 的那種：音訊檔本身就是正式檔
+    for wav in sorted(set(parts)):
+        path = os.path.join(RECORDING_DIR, wav)
+        sp = _tts_state_path(path)
+        st = states.get(os.path.basename(sp))
+        if st is not None:
+            if st.get("pid") and int(st["pid"]) != os.getpid() and _pid_alive(st["pid"]):
+                continue
+        else:
+            try:
+                if time.time() - os.path.getmtime(path) < _TTS_ORPHAN_SEC:
+                    continue
+            except OSError:
+                continue
+            st = {}
+        if not os.path.exists(path):
+            _tts_rm(sp)
+            continue
+        try:
+            with wave.open(path) as w:
+                secs = w.getnframes() / float(w.getframerate() or 1)
+        except Exception:                           # noqa: BLE001  檔頭壞了也交給 ffmpeg 試
+            secs = None
+        if secs == 0:
+            _tts_rm(path)
+            _tts_rm(sp)
+            continue
+        final = path
+        if wav.endswith(".part.wav"):
+            stem = os.path.join(RECORDING_DIR, wav[1:-len(".part.wav")] + "_未完成")
+            ff = ffmpeg if ffmpeg is not None else _tts_ffmpeg()
+            final = None
+            if ff and (st.get("fmt") or "mp3") == "mp3":
+                try:
+                    rr = subprocess.run([ff, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", path,
+                                         "-codec:a", "libmp3lame", "-q:a", "3", stem + ".mp3"],
+                                        capture_output=True, timeout=1800, **_SUBPROCESS_FLAGS)
+                    if rr.returncode == 0 and os.path.exists(stem + ".mp3"):
+                        final = stem + ".mp3"
+                        _tts_rm(path)
+                    else:
+                        _tts_rm(stem + ".mp3")
+                except (OSError, subprocess.SubprocessError):
+                    _tts_rm(stem + ".mp3")
+            if final is None:
+                try:
+                    os.replace(path, stem + ".wav")
+                    final = stem + ".wav"
+                except OSError:
+                    continue
+        _tts_rm(sp)
+        out.append((final, st.get("written"), st.get("total"), secs))
+    return out
+
+
+def _tts_rm(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _tts_ffmpeg():
+    try:
+        import jtlw_tts.engine as _E
+        return _E._ffmpeg()
+    except Exception:                               # noqa: BLE001
+        return None
+
+
+def _tts_report_recovered(found):
+    for path, written, total, secs in found:
+        what = f"已存到第 {written} 段（共 {total} 段）" if written and total else "已存的部分"
+        dur = f"、{int(secs // 60):02d}:{int(secs % 60):02d}" if secs else ""
+        msg = f"上次朗讀沒有正常結束，{what}{dur}：{path}"
+        print(f"  {C_HIGHLIGHT}[注意] {msg}{RESET}", flush=True)
+        _webui_send({"type": "progress", "stage": "上次中斷", "detail": msg})
+
+
 def run_tts(args):
     """文字朗讀／文字轉語音檔（--tts-file、--tts-text）"""
     try:
@@ -13174,6 +13295,7 @@ def run_tts(args):
     print(f"{C_DIM}{'─' * 60}{RESET}", flush=True)
     mode = "tts_file" if file_only else "tts"
     _webui_send({"type": "started", "mode": mode})
+    _tts_report_recovered(_tts_recover_interrupted())
     _webui_send({"type": "tts_info", "voice": voice["name"], "gender": voice.get("gender") or "",
                  "provider": prov.label, "model": model, "model_label": model_label,
                  "rate": rate, "segments": n, "start": start, "chars": len(text),
@@ -13189,6 +13311,7 @@ def run_tts(args):
     save_final = os.path.join(RECORDING_DIR, f"朗讀_{ts_name}.{fmt}") if fmt else None
     save_wav = (os.path.join(RECORDING_DIR, f".朗讀_{ts_name}.part.wav") if fmt == "mp3" else save_final) if fmt else None
     writer, wsr = None, None
+    save_state = _tts_state_path(save_wav) if fmt else None
     stream, out_sr = None, None
     job = live_dir = None
     if browser:
@@ -13242,6 +13365,8 @@ def run_tts(args):
                 writer.writeframes(wpcm)
                 if i < n - 1:
                     writer.writeframes(b"\x00\x00" * int(wsr * gap))
+                _tts_state_write(save_state, {"pid": os.getpid(), "wav": os.path.basename(save_wav), "fmt": fmt,
+                                              "written": i + 1, "total": n})
             secs = len(pcm) / 2 / sr
             audio_secs += secs + (gap if i < n - 1 else 0)
             timestamp = time.strftime("%H:%M:%S")
@@ -13316,6 +13441,8 @@ def run_tts(args):
                     saved = save_final
             except Exception as e:                # noqa: BLE001
                 print(f"  {C_HIGHLIGHT}[注意] 音訊檔沒有存好：{type(e).__name__}: {e}{RESET}", flush=True)
+        if save_state and (saved or not os.path.exists(save_wav)):
+            _tts_rm(save_state)               # 收好了；沒收好（.part.wav 還在）就留著，下次朗讀時整理
         if live_dir:
             shutil.rmtree(live_dir, ignore_errors=True)
         el = int(time.monotonic() - t0)
@@ -13647,7 +13774,7 @@ def _ask_input_source():
         print(f"{C_DIM}{'─' * 60}{RESET}")
         print(f"  {C_HIGHLIGHT}{BOLD}[1] 即時音訊擷取{RESET}  {C_HIGHLIGHT}{REVERSE} 預設 {RESET}")
         print(f"  {C_DIM}[2]{RESET} {C_WHITE}讀入音訊檔案{RESET}")
-        print(f"  {C_DIM}[3]{RESET} {C_WHITE}文字內容朗讀{RESET}  {C_DIM}台灣華語念出來（GPU 伺服器或 Apple Silicon Mac）{RESET}")
+        print(f"  {C_DIM}[3]{RESET} {C_WHITE}文字內容朗讀{RESET}  {C_DIM}台灣華語念出來（GPU 伺服器、Apple Silicon Mac 或 NVIDIA 顯示卡 beta）{RESET}")
         print(f"  {C_DIM}[4]{RESET} {C_WHITE}文字轉語音檔{RESET}  {C_DIM}不播放，存成 MP3{RESET}")
         print(f"{C_DIM}{'─' * 60}{RESET}")
         print(f"{C_WHITE}選擇 (1-4) [1]：{RESET}", end=" ")
@@ -18556,7 +18683,7 @@ def parse_args():
         (f"{_sc} --input m.mp3 --diarize --mode zh --summarize", "中文辨識 + 講者 + 摘要"),
         (f"{_sc} --input meeting.mp3 --local-asr", "強制本機 辨識"),
         (f"{_sc} --summarize log1.txt log2.txt", "批次摘要記錄檔"),
-        (f"{_sc} --tts-file 講稿.txt", "文字朗讀：台灣華語念出來（GPU 伺服器或 Apple Silicon Mac）"),
+        (f"{_sc} --tts-file 講稿.txt", "文字朗讀：台灣華語念出來（GPU 伺服器、Apple Silicon Mac，或 Windows＋NVIDIA 顯示卡 beta）"),
         (f"{_sc} --tts-file 講稿.txt --tts-rate 1.2 --tts-save mp3", "朗讀＋存成 MP3，語速 1.2 倍"),
         (f"{_sc} --tts-file 講稿.txt --tts-device none --tts-save mp3", "文字轉語音檔（不播放）"),
         (f"{_sc} --tts-text '今天下午三點半開會。'", "直接念一段文字"),
@@ -18676,7 +18803,7 @@ def parse_args():
         "--webui", action="store_true",
         help="同時將即時字幕推送到 WebUI（需另外啟動 webui.py）")
     # 文字轉語音（v2.27.0）：朗讀是主程式的一個模式，字幕、懸浮字幕、WebUI 都沿用既有的
-    tts = parser.add_argument_group("文字轉語音（台灣華語朗讀，GPU 伺服器或 Apple Silicon Mac）")
+    tts = parser.add_argument_group("文字轉語音（台灣華語朗讀，GPU 伺服器、Apple Silicon Mac，或 Windows＋NVIDIA 顯示卡 beta）")
     tts.add_argument("--tts-file", metavar="FILE",
                      help="朗讀文字檔（.txt／.md／.srt／.vtt；本工具的摘要檔只念「重點摘要」）")
     tts.add_argument("--tts-text", metavar="TEXT", help="直接朗讀這段文字")
@@ -18689,8 +18816,9 @@ def parse_args():
                      help="播放裝置：default（系統預設）、裝置 ID（--tts-list 列出）、none（不播放，只存檔）")
     tts.add_argument("--tts-save", choices=["mp3", "wav"], metavar="FORMAT",
                      help="同時存成音訊檔（mp3／wav，存在 recordings/）；--tts-device none 時預設 mp3")
-    tts.add_argument("--tts-provider", choices=["auto", "remote", "mlx"], metavar="WHERE",
-                     help="合成位置：auto（GPU 伺服器優先）、remote（GPU 伺服器）、mlx（Apple Silicon 本機）")
+    tts.add_argument("--tts-provider", choices=["auto", "remote", "cuda", "mlx"], metavar="WHERE",
+                     help="合成位置：auto（GPU 伺服器優先）、remote（GPU 伺服器）、cuda（本機 NVIDIA 顯示卡，beta，"
+                          "Windows 先執行 .\\install.ps1 -LocalTTS）、mlx（Apple Silicon 本機）")
     tts.add_argument("--tts-model", choices=["voxcpm2", "breezyvoice"], metavar="MODEL",
                      help="合成模型：voxcpm2（預設，速度快）、breezyvoice（台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器）")
     tts.add_argument("--tts-steps", type=int, choices=[6, 10], metavar="N",
@@ -18698,7 +18826,7 @@ def parse_args():
     tts.add_argument("--tts-start", type=int, default=1, metavar="N",
                      help="從第 N 段開始念（重念；預設 1）")
     tts.add_argument("--tts-list", action="store_true", help="列出聲音與播放裝置後離開")
-    ip = parser.add_argument_group("雙向語音口譯（v2.28.0，英中雙向 --mode en_zh；合成在 GPU 伺服器或 Apple Silicon Mac）")
+    ip = parser.add_argument_group("雙向語音口譯（v2.28.0，英中雙向 --mode en_zh；合成只在 GPU 伺服器）")
     ip.add_argument("--speak-me", metavar="DEV", default=None,
                     help="對方說的英文翻成中文後念給我聽：播放裝置（default＝系統預設、裝置編號或名稱的一部分；請用耳機）")
     ip.add_argument("--speak-them", metavar="DEV", default=None,

@@ -655,19 +655,27 @@ def _tts_worker_main():
     import urllib.parse
     port = int(sys.argv[sys.argv.index("--tts-worker") + 1])
     parent = os.getppid()
+    # 用戶端本機合成（v2.32.0，Windows＋NVIDIA，beta）：沒有主服務管它，由用到它的程式（WebUI、主程式）共用同一個埠號，
+    # 閒置這麼多秒（載入失敗時 30 秒）自己結束。GPU 伺服器不設這個環境變數，照舊跟著主服務
+    idle = float(os.environ.get("JT_TTS_WORKER_IDLE") or 0)
+    state = {"ready": False, "error": "", "last": time.monotonic()}
+    lock = threading.Lock()
+    R = {}
 
     def _watch():
         while True:
-            time.sleep(5)
-            if os.getppid() != parent:          # 主服務結束了
+            time.sleep(1 if idle else 5)
+            if idle:
+                limit = min(30, idle) if state["error"] else idle
+                if time.monotonic() - state["last"] > limit and lock.acquire(blocking=False):
+                    print(f"[tts-worker] 閒置 {limit:.0f} 秒，結束", flush=True)
+                    os._exit(0)
+            elif os.getppid() != parent:        # 主服務結束了
                 try:
                     os.killpg(0, signal.SIGKILL)
                 finally:
                     os._exit(0)
     threading.Thread(target=_watch, daemon=True).start()
-    state = {"ready": False, "error": ""}
-    lock = threading.Lock()
-    R = {}
 
     class _H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -692,6 +700,13 @@ def _tts_worker_main():
                 else self._send(503, {"ok": False, "loading": True})
 
         def do_POST(self):
+            state["last"] = time.monotonic()
+            try:
+                self._post()
+            finally:
+                state["last"] = time.monotonic()
+
+        def _post(self):
             if self.path not in ("/synthesize", "/synthesize_stream", "/convert"):
                 return self._send(404, {"error": "not found"})
             if not state["ready"]:
@@ -757,7 +772,10 @@ def _tts_worker_main():
                 R["torch"].cuda.empty_cache()
 
     # 先綁埠號再載入（比照 Qwen worker：同一個埠已有 worker 時立刻失敗，不會白白載一份模型）
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), _H)
+    class _Srv(http.server.ThreadingHTTPServer):
+        # Windows 的 SO_REUSEADDR 允許兩個行程綁同一個埠（第二個 worker 不會失敗、兩份模型都載入），不設
+        allow_reuse_address = os.name != "nt"
+    srv = _Srv(("127.0.0.1", port), _H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
         import soundfile
@@ -792,7 +810,10 @@ def _tts_worker_main():
 
 
 # ── 文字轉語音的安裝（只用標準函式庫：安裝程式在 GPU 伺服器、Mac 本機都用這一份，不必在 install.sh／install.ps1 各寫一遍）──
-TTS_G2PW_URL = "https://storage.googleapis.com/esun-ai/g2pW/G2PWModel-v2-onnx.zip"
+# g2pW 模型：原本的 storage.googleapis.com/esun-ai 已經不存在（2026-11-02 起 NoSuchBucket，新安裝下載 404），
+# 改用作者（YC-Chen）在 HuggingFace 的同一個檔案（固定版本；解開後 5 個檔跟原本的逐位元組相同）＋檢查 SHA256
+TTS_G2PW_URL = "https://huggingface.co/YC-Chen/g2pW/resolve/fb4784f7dce8466a53dd4f3552f5a4c5b657b90c/G2PWModel-v2-onnx.zip"
+TTS_G2PW_SHA256 = "699f3c1fd7fb0e2c2d49ed2486826fd5bff233fee7759350a91c3b49aedc4ed2"
 TTS_BERT = ("google-bert/bert-base-chinese", "8f23c25b06e129b6c986331a13d8d025a92cf0ea")
 TTS_MOE_URL = "https://raw.githubusercontent.com/g0v/moedict-data/a6dc997417507eb510fc29822bc514de2c92728c/dict-revised.json.xz"
 TTS_MOE_NOTICE = ("moe_words.tsv 由教育部《重編國語辭典修訂本》（g0v/moedict-data 整理）轉成「詞→讀音」對照，只做格式轉換。\n"
@@ -852,6 +873,7 @@ def _tts_download(url, dest, tries=6, stall=30):
 def _tts_fetch_data(d):
     """台灣念法要用的資源 → d：G2PWModel/（g2pW 模型，約 600 MB）、bert-base-chinese/（分詞器）、moe_words.tsv（教育部辭典對照）。
     已經有的不重下"""
+    import hashlib
     import lzma
     import zipfile
     os.makedirs(d, exist_ok=True)
@@ -859,6 +881,13 @@ def _tts_fetch_data(d):
     if not os.path.exists(os.path.join(g, "version")):
         print("  [文字轉語音] 下載 g2pW 模型（約 600 MB，判斷破音字的台灣念法）...", flush=True)
         z = _tts_download(TTS_G2PW_URL, os.path.join(d, "G2PWModel.zip"))
+        h = hashlib.sha256()
+        with open(z, "rb") as f:
+            for b in iter(lambda: f.read(1 << 20), b""):
+                h.update(b)
+        if h.hexdigest() != TTS_G2PW_SHA256:
+            os.remove(z)
+            raise RuntimeError(f"g2pW 模型檔案的 SHA256 不對（{h.hexdigest()[:16]}…），已刪除：重新執行會再下載一次")
         shutil.rmtree(g, ignore_errors=True)          # 上次解到一半的先清掉（壓縮檔最上層剛好就叫 G2PWModel）
         with zipfile.ZipFile(z) as zf:
             top = zf.namelist()[0].split("/")[0]
@@ -913,6 +942,13 @@ def _tts_torch_index(cap, cuda):
     raise RuntimeError(f"顯示卡驅動只支援 CUDA {cuda[0]}.{cuda[1]}，文字轉語音需要 12.8 以上")
 
 
+TTS_READY_MARK = "jtlw-tts-ready"           # --tts-setup 最後檢查通過才寫在 venv-tts 裡
+
+
+def _tts_venv_python(venv):
+    return os.path.join(venv, "Scripts", "python.exe") if os.name == "nt" else os.path.join(venv, "bin", "python")
+
+
 def _tts_setup_main():
     """GPU 伺服器：server.py --tts-setup。建立 ~/jt-whisper-server/venv-tts、裝固定版本的套件、下載 VoxCPM2 與台灣念法資源，最後驗證。
     重跑安全：已經裝好的跳過。裝完約 11 GB（venv-tts 5.2 GB：CUDA 13 版 torch 自帶整組 CUDA 程式庫；模型 4.7 GB；g2pW 0.6 GB；2026-10-09 GB10 實測）"""
@@ -920,7 +956,7 @@ def _tts_setup_main():
     import subprocess
     home = os.path.dirname(os.path.abspath(__file__))
     venv = os.environ.get("JT_TTS_VENV") or os.path.join(home, "venv-tts")
-    py = os.path.join(venv, "bin", "python")
+    py = _tts_venv_python(venv)
     info = _tts_gpu_info()
     if not info:
         print("  [文字轉語音] 這台沒有 NVIDIA 顯示卡（找不到 nvidia-smi），不設定", flush=True)
@@ -945,7 +981,9 @@ def _tts_setup_main():
             sys.exit(1)
 
     if not os.path.exists(py):
-        base = next((p for p in (_sh.which("python3.12"), _sh.which("python3.11"), _sh.which("python3")) if p), None)
+        # Windows（用戶端本機合成，v2.32.0）沒有 python3.12 這種名稱：用執行安裝的這個 Python（產品 venv 的，venv 會沿用它的基底）
+        base = next((p for p in (_sh.which("python3.12"), _sh.which("python3.11"), _sh.which("python3")) if p), None) \
+            if os.name != "nt" else sys.executable
         if not base:
             print("  [文字轉語音] 找不到 python3", flush=True)
             sys.exit(1)
@@ -968,7 +1006,9 @@ def _tts_setup_main():
     run([py, "-c", "import torch, voxcpm, g2pw, pypinyin, opencc; assert torch.cuda.is_available(), '看不到顯示卡'; "
                    "x = torch.ones(4, device='cuda'); print('  torch', torch.__version__, torch.cuda.get_device_name(0), float(x.sum()))"],
         "檢查")
-    print("  [文字轉語音] 完成：第一次朗讀時才啟動合成服務（約 30 秒），閒置 30 分鐘自動關閉", flush=True)
+    with open(os.path.join(venv, TTS_READY_MARK), "w", encoding="utf-8") as f:   # 用戶端看這個判斷本機合成裝好了（不必每次啟動 venv-tts 檢查）
+        f.write(f"{TTS_TORCH}+{idx}\n")
+    print("  [文字轉語音] 完成：第一次朗讀時才啟動合成程式（約 30 秒），閒置後自動關閉", flush=True)
 
 
 # ── BreezyVoice（MediaTek Research，Apache-2.0；2026-10-09 起選用，不是預設）──────────────
@@ -1293,7 +1333,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.31.8"
+SERVER_VERSION = "2.32.0"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。

@@ -10,13 +10,16 @@
     .\install.ps1 -Upgrade
 .EXAMPLE
     .\install.ps1 -InterpMic    # 只安裝 usbip-win2（雙向口譯「念給對方聽」的口譯麥克風）
+.EXAMPLE
+    .\install.ps1 -LocalTTS     # 只安裝本機文字轉語音（beta，需要 NVIDIA 顯示卡，約 20 GB）
 .NOTES
     Author: Jason Cheng (Jason Tools)
 #>
 
 param(
     [switch]$Upgrade,
-    [switch]$InterpMic
+    [switch]$InterpMic,
+    [switch]$LocalTTS
 )
 
 Set-StrictMode -Version Latest
@@ -770,6 +773,77 @@ function offer_interp_mic {
     $null = install_usbip_win2
 }
 
+# ─── 本機文字轉語音：NVIDIA 顯示卡（v2.32.0，beta，選用）────────────────────
+# 朗讀在這台的 NVIDIA 顯示卡上合成，不用 GPU 伺服器。跟 GPU 伺服器同一套：remote_whisper_server.py --tts-setup
+# 建立 venv-tts（固定版本的 CUDA 版 torch＋voxcpm，跟產品 venv 分開，不影響辨識用的套件）、下載 VoxCPM2 與台灣念法資源。
+# 約 20 GB（torch 與 CUDA 程式庫、模型 4.7 GB、g2pW 0.6 GB）。完整安裝時有 NVIDIA 顯示卡才問（預設否）、升級不問；-LocalTTS 直接安裝
+$LOCAL_TTS_VENV = Join-Path $SCRIPT_DIR "venv-tts"
+
+function find_nvidia_smi {
+    $c = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    foreach ($p in @("$env:SystemRoot\System32\nvidia-smi.exe", "${env:ProgramFiles}\NVIDIA Corporation\NVSMI\nvidia-smi.exe")) {
+        if (Test-Path $p) { return $p }
+    }
+    return ""
+}
+
+function local_tts_ready {
+    return ((Test-Path (Join-Path $LOCAL_TTS_VENV "jtlw-tts-ready")) -and (Test-Path (Join-Path $SCRIPT_DIR "tts_data\moe_words.tsv")))
+}
+
+function install_local_tts {
+    section "本機文字轉語音（NVIDIA 顯示卡，beta）"
+    $py = Join-Path $SCRIPT_DIR "venv\Scripts\python.exe"
+    if (-not (Test-Path $py)) {
+        check_fail "找不到 venv：請先執行 .\install.ps1 完成安裝"
+        return $false
+    }
+    $smi = find_nvidia_smi
+    if (-not $smi) {
+        check_fail "找不到 NVIDIA 顯示卡（nvidia-smi）：本機合成需要 NVIDIA 顯示卡與驅動；沒有的話請用 GPU 伺服器"
+        return $false
+    }
+    $savedPath = $env:PATH
+    $env:PATH = (Split-Path $smi) + ";" + $env:PATH          # 安裝程式自己找 nvidia-smi
+    $env:JT_TTS_VENV = $LOCAL_TTS_VENV
+    $env:JT_TTS_DIR = Join-Path $SCRIPT_DIR "tts_data"
+    $env:PYTHONIOENCODING = "utf-8"
+    try {
+        # | Out-Host：函式裡外部程式的標準輸出會變成函式的回傳值（安裝進度看不到、回傳值變成陣列而永遠是真）
+        & $py (Join-Path $SCRIPT_DIR "remote_whisper_server.py") --tts-setup | Out-Host
+        $rc = $LASTEXITCODE
+    } finally {
+        $env:PATH = $savedPath
+        Remove-Item Env:JT_TTS_VENV, Env:JT_TTS_DIR, Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
+    }
+    if ($rc -eq 0 -and (local_tts_ready)) {
+        check_ok "本機文字轉語音（beta）安裝完成"
+        info "WebUI 選「文字內容朗讀」，合成位置選「本機（NVIDIA 顯示卡，beta）」；有 GPU 伺服器時預設仍用 GPU 伺服器"
+        info "移除：刪掉安裝資料夾裡的 venv-tts"
+        return $true
+    }
+    check_fail "本機文字轉語音安裝沒有完成（結束碼 $rc）：重新執行 .\install.ps1 -LocalTTS，已下載的部分不會重下"
+    return $false
+}
+
+function offer_local_tts {
+    if ([Console]::IsInputRedirected) { return }
+    if ($env:JTLW_UPGRADE_QUIET) { return }
+    if (local_tts_ready) { return }
+    if (-not (find_nvidia_smi)) { return }
+    section "本機文字轉語音（NVIDIA 顯示卡，beta，選用）"
+    Write-Host "  ${C_WHITE}朗讀在這台的 NVIDIA 顯示卡上合成，不用 GPU 伺服器（有 GPU 伺服器的話不必裝）${NC}"
+    Write-Host "  ${C_DIM}  beta：還沒有在各種顯示卡上實測；需要約 20 GB 磁碟、建議 8 GB 以上顯示記憶體${NC}"
+    Write-Host "  ${C_DIM}  之後要裝：.\install.ps1 -LocalTTS${NC}"
+    $ans = Read-Host "  是否安裝本機文字轉語音（beta）？(y/N)"
+    if ("$ans" -notmatch '^[Yy]') {
+        info "跳過（之後要裝：.\install.ps1 -LocalTTS）"
+        return
+    }
+    $null = install_local_tts
+}
+
 # ─── Microsoft Visual C++ 執行階段（v2.31.7，2026-10-26 乾淨重裝的 Win11 實機）──────────
 # ctranslate2（faster-whisper、Argos、NLLB）要 msvcp140.dll；乾淨的 Windows 沒有，Python 只自帶 vcruntime140*.dll。
 # 以前是後面裝 Visual Studio C++ 編譯器時順便裝上，所以編譯器裝不起來（沒有 winget、沒有系統管理員）的電腦語音辨識整個不能用，
@@ -848,7 +922,7 @@ $banner_line = '=' * $cols
 if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.31.8 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.32.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""
@@ -862,6 +936,11 @@ Write-Host ""
 
 if ($InterpMic) {
     $ok = install_usbip_win2
+    if ($ok) { exit 0 } else { exit 1 }
+}
+
+if ($LocalTTS) {
+    $ok = install_local_tts
     if ($ok) { exit 0 } else { exit 1 }
 }
 
@@ -3415,7 +3494,8 @@ $features = @(
     @{ OK = (venv_import_ok "argostranslate"); Desc = "Argos 離線翻譯";          Engine = "僅英翻中" },
     @{ OK = (Test-Path (Join-Path $env:LOCALAPPDATA "jt-live-whisper\models\nllb-600m\model.bin")); Desc = "NLLB 離線翻譯"; Engine = "中日韓英互譯，模型非商業授權" },
     @{ OK = (venv_import_ok "moonshine_voice");      Desc = "Moonshine 即時辨識";       Engine = "英文低延遲" },
-    @{ OK = (qwen_tf_ok);                            Desc = "Qwen3-ASR 本機辨識（實驗）"; Engine = "離線中英韓，transformers" }
+    @{ OK = (qwen_tf_ok);                            Desc = "Qwen3-ASR 本機辨識（實驗）"; Engine = "離線中英韓，transformers" },
+    @{ OK = (local_tts_ready);                       Desc = "本機文字轉語音（beta）";     Engine = "NVIDIA 顯示卡，選用：.\install.ps1 -LocalTTS" }
 )
 
 foreach ($feat in $features) {
@@ -3463,6 +3543,7 @@ Write-Host "  ${C_DIM}      安裝程式會自動偵測並修復因路徑變更�
 Write-Host ""
 offer_desktop_shortcut
 offer_interp_mic
+offer_local_tts
 Write-Host ""
 Write-Host "  ${C_DIM}安裝 log: $INSTALL_LOG${NC}"
 Write-Host ""

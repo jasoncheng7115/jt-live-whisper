@@ -1233,7 +1233,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.31.8",
+        "last": last, "version": "2.32.0",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -2094,6 +2094,9 @@ def _interp_them_info(devices):
     return {"supported": False, "note": _TM_INTERP_WIN_NEED}
 
 
+_TTS_WHERE = ("auto", "remote", "cuda", "mlx")       # 合成位置（cuda＝本機 NVIDIA 顯示卡，beta，v2.32.0）
+
+
 def _tts_info(admin, refresh=False):
     """設定頁「文字內容朗讀」要的全部資訊。合成位置分開回報能不能用（不能用的說明原因，前端反灰）"""
     if _tts is None:
@@ -2105,8 +2108,10 @@ def _tts_info(admin, refresh=False):
     models = []
     for key, m in _tts.MODELS.items():
         mlocs = []
-        for where, label in (("remote", "GPU 伺服器" + (f"（{rw.get('host')}）" if rw.get("host") else "")),
-                             ("mlx", "本機（Apple Silicon）")):
+        # 本機 NVIDIA（beta，v2.32.0）：Windows 一律列出（沒裝的反灰、寫怎麼裝）；其他平台只有已經裝好才列
+        for where, label in (("remote", "GPU 伺服器" + (f"（{rw.get('host')}）" if rw.get("host") else "")),)  \
+                + ((("cuda", _tts.CudaProvider.label),) if os.name == "nt" or _tts.CudaProvider.unavailable() is None else ()) \
+                + (("mlx", "本機（Apple Silicon）"),):
             prov, why = _tts.pick_provider(cfg, refresh=refresh, where=where, model=key)
             mlocs.append({"value": where, "label": label, "available": prov is not None, "reason": why})
         models.append({"value": key, "label": m["label"], "tag": m["tag"], "note": m["note"], "default": key == _tts.DEFAULT_MODEL,
@@ -2262,8 +2267,8 @@ def api_tts_settings(request: Request, body: dict = {}):
                                  + "、".join(bad)}, status_code=400)
         t["custom"] = custom
     if "provider" in body:
-        if body["provider"] not in ("auto", "remote", "mlx"):
-            return JSONResponse({"ok": False, "error": "合成位置只能是 auto、remote、mlx"}, status_code=400)
+        if body["provider"] not in _TTS_WHERE:
+            return JSONResponse({"ok": False, "error": "合成位置只能是 auto、remote、cuda、mlx"}, status_code=400)
         t["provider"] = body["provider"]
     if "mac_steps" in body:
         try:
@@ -2287,7 +2292,7 @@ _TTS_WARM_LOCK = threading.Lock()
 def _tts_warm_run(where, model):
     try:
         prov, _ = _tts.pick_provider(_tts_cfg(), where=where, model=model)
-        if prov is not None and getattr(prov, "kind", "") == "remote":
+        if prov is not None and getattr(prov, "kind", "") in ("remote", "cuda"):   # 本機 NVIDIA：先開好合成程式（主程式朗讀時接著用）
             prov.convert("暖機", {})
     except Exception:
         pass
@@ -2344,7 +2349,7 @@ def api_tts_warm(request: Request, body: dict = {}):
         return JSONResponse({"ok": False, "error": err}, status_code=403)
     if _tts is None:
         return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
-    where = body.get("where") if body.get("where") in ("auto", "remote", "mlx") else "auto"
+    where = body.get("where") if body.get("where") in _TTS_WHERE else "auto"
     model = body.get("model") if body.get("model") in _tts.MODELS else _tts.DEFAULT_MODEL
     with _TTS_WARM_LOCK:
         w = _TTS_WARM.setdefault(model, {"at": -1e9, "running": False})
@@ -2364,7 +2369,7 @@ def api_tts_convert(request: Request, body: dict = {}):
     if _tts is None:
         return JSONResponse({"ok": False, "error": _TTS_MISSING}, status_code=503)
     cfg = _tts_cfg()
-    where = body.get("where") if body.get("where") in ("auto", "remote", "mlx") else None
+    where = body.get("where") if body.get("where") in _TTS_WHERE else None
     model = body.get("model") if body.get("model") in _tts.MODELS else None
     prov, why = _tts.pick_provider(cfg, where=where, model=model)
     if not prov:
@@ -2419,7 +2424,7 @@ def _tts_args(body):
     args += ["--tts-rate", f"{rate:g}"]
     if body.get("tts_pause") in ("short", "normal", "long"):
         args += ["--tts-pause", body["tts_pause"]]
-    if body.get("tts_where") in ("auto", "remote", "mlx"):
+    if body.get("tts_where") in _TTS_WHERE:
         args += ["--tts-provider", body["tts_where"]]
     if str(body.get("tts_steps")) in ("6", "10"):
         args += ["--tts-steps", str(body["tts_steps"])]

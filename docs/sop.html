@@ -141,7 +141,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.31.8 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.32.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -2936,7 +2936,7 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 </ul>
 <hr>
 <h3 id="4-15-文字轉語音台灣華語朗讀v2270-起">4-15. 文字轉語音：台灣華語朗讀（v2.27.0 起）</h3>
-<p>把文字念成台灣華語：WebUI 的「輸入來源」選「<strong>文字內容朗讀</strong>」邊念邊顯示字幕，或選「<strong>文字轉語音檔</strong>」直接存成 MP3／WAV；命令列與互動選單也可以用。合成在自己的 GPU 伺服器或 Apple Silicon Mac 上進行，資料不經過雲端，也不使用作業系統內建的語音。</p>
+<p>把文字念成台灣華語：WebUI 的「輸入來源」選「<strong>文字內容朗讀</strong>」邊念邊顯示字幕，或選「<strong>文字轉語音檔</strong>」直接存成 MP3／WAV；命令列與互動選單也可以用。合成在自己的 GPU 伺服器、Apple Silicon Mac，或有 NVIDIA 顯示卡的 Windows（beta，v2.32.0 起）上進行，資料不經過雲端，也不使用作業系統內建的語音。</p>
 <p><strong>預設用 VoxCPM2，是為了速度與效能</strong>：GPU 伺服器比說話快一點、Mac 本機大約跟說話一樣快，兩種機器都能跑，邊念邊播不會卡；它主要學的是大陸念法，台灣念法由本工具箱補上（見「台灣念法與發音字典」）。
 另外可以選 <strong>BreezyVoice</strong>（MediaTek）：用台灣華語訓練、口音道地，<strong>但合成速度慢，不適合即時</strong>（合成時間約音訊長度的 1.2～2.5 倍），只在 GPU 伺服器提供。適合轉成語音檔、不趕時間的時候；拿來即時朗讀，每段之間會停下來等合成。</p>
 <h4 id="模型與推論引擎">模型與推論引擎</h4>
@@ -2952,7 +2952,7 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 <tbody><tr>
 <td>OpenBMB VoxCPM2（<code>openbmb/VoxCPM2</code>）</td>
 <td>語音合成</td>
-<td>GPU 伺服器用，bf16，約 4.7 GB</td>
+<td>GPU 伺服器、Windows 本機 NVIDIA 顯示卡（beta）用，bf16，約 4.7 GB</td>
 <td>Apache-2.0</td>
 </tr>
 <tr>
@@ -2992,10 +2992,15 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 <td>Apple Silicon Mac，記憶體 16 GB 以上</td>
 <td>6 步約 1.1、10 步約 1.5</td>
 </tr>
+<tr>
+<td>PyTorch（CUDA 12.8／13）</td>
+<td>Windows 本機 NVIDIA 顯示卡（<strong>beta</strong>，v2.32.0 起）</td>
+<td>跟顯示卡有關，還沒有 Windows 實機數字</td>
+</tr>
 </tbody></table>
 <ul>
-<li>兩者都沒有的機器（Windows、Linux 只有 CPU、Intel Mac）不提供文字轉語音：CPU 太慢，畫面會說明原因</li>
-<li>設定頁「語音合成」的「合成位置」列出 GPU 伺服器與 Mac 本機，不能用的反灰並寫原因（例如 GPU 伺服器還沒裝文字轉語音）</li>
+<li>都沒有的機器（只有 CPU 的 Windows、Linux，Intel Mac）不提供文字轉語音：CPU 太慢，畫面會說明原因</li>
+<li>設定頁「語音合成」的「合成位置」列出 GPU 伺服器、本機（NVIDIA 顯示卡，beta；只在 Windows 列出）與 Mac 本機，不能用的反灰並寫原因（例如 GPU 伺服器還沒裝文字轉語音）</li>
 </ul>
 <h4 id="安裝">安裝</h4>
 <p><strong>GPU 伺服器</strong>：執行 <code>./install.sh</code>（Windows 為 <code>.\install.ps1</code>）設定或檢查 GPU 伺服器時，會問「要在 GPU 伺服器安裝文字轉語音嗎？」（預設「否」；沒有人可以回答時不裝）。也可以直接在伺服器上執行：</p>
@@ -3009,6 +3014,20 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 <p>它會建立獨立的 Python 環境 <code>~/jt-whisper-server/venv-breezy</code>、下載 BreezyVoice 的程式（固定版本，放在 <code>~/jt-whisper-server/breezyvoice/</code>）與模型，裝完約佔 8 GB（Python 環境 5.5 GB、模型 2.2 GB），安裝時要有 16 GB 可用空間。
 GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（重新執行安裝程式就會更新）。</p>
 <p><strong>Mac 本機</strong>（Apple Silicon、記憶體 16 GB 以上）：<code>./install.sh</code> 會問「是否在這台 Mac 啟用本機文字轉語音？」（預設「是」，按 Enter 就裝），下載 MLX 版模型與台灣念法資源（放在安裝資料夾的 <code>tts_data/</code>）。</p>
+<p><strong>Windows 本機 NVIDIA 顯示卡（beta，v2.32.0 起）</strong>：沒有 GPU 伺服器、但這台 Windows 有 NVIDIA 顯示卡時，可以在本機合成。選用安裝：</p>
+<pre><code class="language-powershell">.\install.ps1 -LocalTTS
+</code></pre>
+<p>完整安裝（<code>.\install.ps1</code>）結束時，偵測到 NVIDIA 顯示卡也會問一次「是否安裝本機文字轉語音（beta）？(y/N)」（預設「否」；沒有人可以回答、升級時都不問）。
+它跟 GPU 伺服器的安裝是同一套：在安裝資料夾建立獨立的 Python 環境 <code>venv-tts</code>（依驅動選 CUDA 12.8 或 13 版 PyTorch，跟辨識用的套件分開，互不影響）、下載 VoxCPM2 與台灣念法資源（<code>tts_data\</code>），最後檢查顯示卡能不能用。</p>
+<ul>
+<li>需要：NVIDIA 顯示卡、驅動支援 CUDA 12.8 以上（<code>nvidia-smi</code> 右上角的 CUDA Version）、約 20 GB 可用磁碟（PyTorch 與 CUDA 程式庫、模型 4.7 GB、g2pW 0.6 GB），建議 8 GB 以上顯示記憶體（模型約佔 6 GB）</li>
+<li>第一次朗讀時才在背景啟動合成程式（GPU 伺服器上約 30 秒，硬碟慢的電腦更久），WebUI 與朗讀共用同一份，<strong>閒置 10 分鐘自己結束</strong>、釋放顯示記憶體；設定頁選了「文字內容朗讀」就會先在背景啟動</li>
+<li>有 GPU 伺服器時預設照樣用 GPU 伺服器（自動選擇的順序：GPU 伺服器 → 本機 NVIDIA → Mac 本機）；要指定本機，在「合成位置」選「本機（NVIDIA 顯示卡，beta）」，命令列加 <code>--tts-provider cuda</code></li>
+<li>雙向語音口譯的合成仍只用 GPU 伺服器；BreezyVoice 只在 GPU 伺服器</li>
+<li><strong>beta 的意思</strong>：程式跟 GPU 伺服器同一支，已在 Linux＋NVIDIA（DGX Spark）實際合成、在 Windows（沒有 NVIDIA 顯示卡）跑過完整安裝流程與合成程式的啟動、共用、閒置結束，<strong>還沒有在 Windows＋NVIDIA 實機合成過</strong>。遇到問題請附上 <code>tts_tmp\local_tts_worker.log</code>（合成程式的紀錄）</li>
+<li>合成程式只聽本機（127.0.0.1）的埠號 19786；被別的程式佔用時，設環境變數 <code>JTLW_TTS_LOCAL_PORT</code> 換一個</li>
+<li>移除：刪掉安裝資料夾裡的 <code>venv-tts</code>；模型在 HuggingFace 快取（<code>%USERPROFILE%\.cache\huggingface\hub\models--openbmb--VoxCPM2</code>）</li>
+</ul>
 <p><strong>檢查 GPU 伺服器時要密碼</strong>：這台電腦還沒有登入 GPU 伺服器的金鑰時，安裝程式會先說「這台電腦登入 root@… 需要密碼」再問（輸入時畫面不會顯示），輸入一次就把這台的金鑰加到伺服器，之後不用再輸入；沒有人可以輸入（自動化執行）時略過伺服器檢查（v2.27.0 起；以前密碼提示被「正在檢查伺服器環境」的轉圈蓋掉，看起來像卡住）。</p>
 <h4 id="聲音內建與匯入">聲音：內建與匯入</h4>
 <p><strong>內建 8 個聲音</strong>，裝好就能念：女聲（溫柔、主播、活潑、沉穩）、男聲（低沉、清爽、主播、溫和）。它們是 VoxCPM2 依文字描述（例如「年輕女性，聲音溫柔親切，台灣口音」）產生的，<strong>不是真人錄音</strong>，沒有肖像與授權的問題；沒有選聲音時用「女聲・溫柔」。內建聲音不能刪除、不能改分類，在「管理聲音」清單裡標「內建」。</p>
@@ -3027,7 +3046,7 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 <li>要念的文字：貼到文字框，或從清單選 <code>recordings/</code>、<code>logs/</code> 裡的文字檔（.txt、.md、.srt、.vtt），也可以把文字檔拖進來上傳。本工具的摘要檔只念「重點摘要」那一段；時間戳、條列符號、網址參數、字幕檔的時間軸不念。一次最多 100000 字</li>
 <li>「語音合成」：<ul>
 <li>合成模型：VoxCPM2（預設，速度快）或 BreezyVoice（標「台灣口音・較慢」，下方寫明「台灣口音，但合成速度慢，不適合即時」；只在 GPU 伺服器，沒有安裝時反灰並寫原因）</li>
-<li>合成位置：GPU 伺服器或 Mac 本機；選 BreezyVoice 時「本機」反灰</li>
+<li>合成位置：GPU 伺服器、本機（NVIDIA 顯示卡，beta；只在 Windows 列出）或 Mac 本機；選 BreezyVoice 時「本機」反灰</li>
 <li>聲音：依性別分組；「管理聲音」匯入、試聽、改性別、設為預設；「發音字典」改念法（見下一節）</li>
 <li>語速：慢（0.8 倍）、正常、稍快（1.2 倍）、快（1.5 倍），音調不變；存成的音訊檔也是這個速度</li>
 <li>段落停頓：短（0.2 秒）、一般（0.5 秒）、長（1 秒）</li>
@@ -3041,7 +3060,13 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 </li>
 <li>按「開始」：跟辨識一樣進入字幕畫面，<strong>每一段開始念的時候才顯示那一段</strong>（標「朗讀」；文字轉語音檔標「轉檔」）。字幕模式（按 T）、懸浮字幕（本機的「懸浮字幕」勾選啟用）都可以用，終端機也會印出每一段</li>
 <li>每一句字幕前面有兩個時間：<strong>合</strong>＝這一句合成花的秒數（比這一句本身短是綠色）、<strong>等</strong>＝播放等合成的秒數（第一句是按下開始後多久出聲；合成跟得上時不顯示）。終端機也會印出</li>
-<li>暫停（P）：聲音與字幕一起停；停止（S，按兩次）：已經合成的部分照樣存檔。念完或停止後，結束卡片上有音訊檔的下載連結（標「語音」）</li>
+<li>暫停（P）：聲音與字幕一起停；停止（S，按兩次）：已經合成的部分照樣存檔。念完或停止後，結束卡片上有音訊檔的下載連結（標「語音」）<ul>
+<li><strong>程式中途當掉、被強制結束、電腦斷電</strong>（v2.32.0 起）：音訊是一邊合成一邊寫進檔案的，已經寫進去的段落都在。下一次開始朗讀時會自動收好：
+存 MP3 的收成 <code>recordings/朗讀_日期_時間_未完成.mp3</code>（沒有 ffmpeg 時是 <code>.wav</code>）；存 WAV 的檔案本來就在原位，只提醒它沒念完。
+終端機與字幕畫面會說明收回哪個檔、存到第幾段（共幾段）、多長。同一台同時開著另一份正在朗讀的不會動到。
+以前（v2.31.8 以前）MP3 要全部念完才轉，中斷時只剩隱藏的 <code>.朗讀_日期_時間.part.wav</code>，看起來像什麼都沒存</li>
+</ul>
+</li>
 <li><strong>重念</strong>：每一句字幕後面的「從這段念」從那一句念到最後（念到一半也可以按，會先停掉再從那一句開始）；結束卡片的「重新朗讀」（文字轉語音檔是「重新產生」）用同樣的文字與設定從頭再來一次</li>
 </ol>
 <p>長文依句子切段（每段最多約 80 字），朗讀時只預先合成到目前段落之後兩段；第一次朗讀時 GPU 伺服器要啟動合成程式，約等 30 秒。選「瀏覽器」播放時，朗讀中不要重新整理或關掉那個分頁：沒有分頁在播放時，約 90 秒後會停止朗讀並說明原因。</p>
@@ -3055,13 +3080,13 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 ./start.sh --tts-file 講稿.txt --tts-rate 1.2 --tts-save mp3   # 念、同時存成 MP3
 ./start.sh --tts-file 講稿.txt --tts-device none --tts-save wav  # 不播放，只存成 WAV
 </code></pre>
-<p>其他參數：<code>--tts-voice 聲音ID</code>、<code>--tts-pause short|normal|long</code>、<code>--tts-device 裝置ID</code>、<code>--tts-provider auto|remote|mlx</code>、<code>--tts-model voxcpm2|breezyvoice</code>（預設 voxcpm2；breezyvoice 只在 GPU 伺服器）、<code>--tts-steps 6|10</code>（Mac 本機）、<code>--tts-start N</code>（從第 N 段開始念）。設定（預設聲音、發音字典）讀 <code>config.json</code>。</p>
+<p>其他參數：<code>--tts-voice 聲音ID</code>、<code>--tts-pause short|normal|long</code>、<code>--tts-device 裝置ID</code>、<code>--tts-provider auto|remote|cuda|mlx</code>（cuda＝Windows 本機 NVIDIA 顯示卡，beta）、<code>--tts-model voxcpm2|breezyvoice</code>（預設 voxcpm2；breezyvoice 只在 GPU 伺服器）、<code>--tts-steps 6|10</code>（Mac 本機）、<code>--tts-start N</code>（從第 N 段開始念）。設定（預設聲音、發音字典）讀 <code>config.json</code>。</p>
 <h4 id="台灣念法與發音字典">台灣念法與發音字典</h4>
 <p>VoxCPM2 預設會有部分大陸念法（例如垃圾念ㄌㄚ ㄐㄧ）。為了讓它念台灣話，我們做了這些事：</p>
 <ul>
 <li><strong>念法以台灣日常說法為準</strong>：教育部辭典為基礎，破音字依上下文判斷；辭典的念法跟日常說法不同的改用日常說法（市場的「場」、強制的「強」、簽署、擷取、液化、德黑蘭的「黑」）；拿不準的由人試聽決定</li>
 <li>用近 400 句台灣華語句子（新聞、生活對話）自動合成、再辨識回來逐字比對，並把將近 5,000 句裡指定的念法逐一檢查是不是台灣日常說法，找出念錯的原因一一修正</li>
-<li>模型不認得的罕用字一律標注音；文字轉成模型最熟悉的寫法再送進去，念錯的地方少了約八成</li>
+<li>模型不認得的罕用字一律加上讀音提示（拼音，例如矽寫成 {xi4}）；文字轉成模型最熟悉的寫法再送進去，念錯的地方少了約八成</li>
 </ul>
 <p>送進模型前，程式先找出每個字的台灣念法，只有跟模型預設不同的字才指定讀音：</p>
 <ol>
@@ -3247,7 +3272,7 @@ WebUI 啟動時會自動換成新格式，密碼不變），設定檔裡沒有�
 <li><strong>念給對方聽</strong>：你說的中文翻成英文，念進「虛擬麥克風」，會議軟體把它當成你的麥克風送出去</li>
 </ul>
 <p>字幕、逐字稿照舊，只是多了語音。合成在 GPU 伺服器（要有文字轉語音，見 4-15；GPU 伺服器要 v2.28.0 以上才有邊合成邊播）。</p>
-<p><strong>任何線上會議軟體都能用</strong>（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合。網站上的示範圖用 Jitsi Meet。</p>
+<p><strong>原理上任何線上會議軟體都能用</strong>（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合。<strong>目前實際開會測過的是 Jitsi Meet</strong>（網站上的示範圖），其他會議軟體還沒有完整實測。</p>
 <h4 id="事前準備與接線">事前準備與接線</h4>
 <p><strong>念給對方聽要有「虛擬麥克風」</strong>：會議軟體只能從麥克風收聲音，我們把英文念進虛擬麥克風、會議軟體從它收，對方才聽得到。口譯期間系統預設麥克風會自動切到它（v2.31.0 起，見下方），會議軟體的麥克風設成「與系統相同／預設」即可。「念給我聽」三個平台都不用另外安裝。</p>
 <table>

@@ -41,7 +41,7 @@ PREFETCH = 2                                     # 朗讀時最多先合成目�
 # 合成模型。VoxCPM2 是預設：速度快（GPU 伺服器約 0.9 倍音訊長度、Mac 8bit 約 1.1 倍），GPU 伺服器與 Apple Silicon 都能跑。
 # BreezyVoice（2026-10-09 加入）用台灣華語訓練、口音道地，但合成慢（約 1.2～2.5 倍）、只在 GPU 伺服器
 MODELS = {
-    "voxcpm2": {"label": "VoxCPM2（OpenBMB）", "tag": "預設", "where": ("remote", "mlx"),
+    "voxcpm2": {"label": "VoxCPM2（OpenBMB）", "tag": "預設", "where": ("remote", "cuda", "mlx"),
                 "note": "預設，速度快（合成時間約音訊長度的 0.9～1.1 倍），GPU 伺服器與 Apple Silicon Mac 都能用"},
     "breezyvoice": {"label": "BreezyVoice（MediaTek）", "tag": "台灣口音・較慢", "where": ("remote",),
                     "note": "台灣口音，但合成速度慢，不適合即時（合成時間約音訊長度的 1.2～2.5 倍）；只在 GPU 伺服器"},
@@ -469,12 +469,140 @@ class MlxProvider:
         return _tts_spoken(R, text, custom)
 
 
+# ── 本機 NVIDIA 顯示卡（v2.32.0，beta）──────────────────────────────
+# Windows 有 NVIDIA 顯示卡時在本機合成（.\install.ps1 -LocalTTS 選用安裝）。跟 GPU 伺服器同一支合成程式：
+# remote_whisper_server.py --tts-worker，在獨立的 venv-tts（固定版本的 CUDA 版 torch＋voxcpm，跟產品 venv 的套件版本互不影響）。
+# 台灣念法在合成程式裡做（同 GPU 伺服器）。合成程式只聽 127.0.0.1、固定埠號：WebUI 與主程式共用同一份，
+# 不會載兩份模型（約 6.5 GB 顯示記憶體）；沒有人管它，閒置 CUDA_IDLE 秒自己結束
+CUDA_VENV = os.environ.get("JTLW_TTS_VENV") or os.path.join(ROOT, "venv-tts")
+CUDA_PORT = int(os.environ.get("JTLW_TTS_LOCAL_PORT") or 19786)
+CUDA_IDLE = 600
+CUDA_READY_MARK = "jtlw-tts-ready"              # = remote_whisper_server.TTS_READY_MARK（--tts-setup 檢查通過才寫）
+CUDA_LOAD_WAIT = 300                            # 第一次載入模型最多等幾秒（GPU 伺服器約 30 秒；一般硬碟慢很多）
+
+
+def _cuda_python():
+    return os.path.join(CUDA_VENV, "Scripts", "python.exe") if os.name == "nt" else os.path.join(CUDA_VENV, "bin", "python")
+
+
+class CudaProvider:
+    """本機 NVIDIA 顯示卡（beta）：本機的 remote_whisper_server.py --tts-worker，VoxCPM2 bf16、10 步（同 GPU 伺服器）"""
+    kind = "cuda"
+    label = "本機（NVIDIA 顯示卡，beta）"
+    _lock = threading.Lock()
+    server = os.path.join(ROOT, "remote_whisper_server.py")
+
+    @staticmethod
+    def unavailable():
+        if sys.platform == "darwin":
+            return "本機 NVIDIA 合成只在 Windows 提供（Apple Silicon Mac 用「本機（Apple Silicon）」）"
+        hint = "：在安裝資料夾執行 .\\install.ps1 -LocalTTS（需要 NVIDIA 顯示卡、約 20 GB）" if os.name == "nt" \
+            else "（目前只在 Windows 提供安裝）"
+        if not os.path.exists(os.path.join(CUDA_VENV, CUDA_READY_MARK)) or not os.path.exists(_cuda_python()):
+            return "這台還沒安裝本機 NVIDIA 合成（beta）" + hint
+        if not os.path.exists(os.path.join(DATA_DIR, "moe_words.tsv")):
+            return "這台還沒有台灣念法資源（教育部辭典）" + hint
+        return None
+
+    def health(self):
+        why = self.unavailable()
+        return {"available": why is None, "reason": why}
+
+    @staticmethod
+    def _base():
+        return f"http://127.0.0.1:{CUDA_PORT}"
+
+    def _ensure(self):
+        """合成程式在（別的程式開的也算）就用；沒有就開一個，等它載入模型"""
+        with self._lock:
+            deadline = time.monotonic() + CUDA_LOAD_WAIT
+            proc = None
+            while True:
+                try:
+                    code, body, _ = _http("GET", self._base() + "/health", timeout=5)
+                except (urllib.error.URLError, OSError):
+                    code, body = None, b""
+                if code == 200:
+                    return
+                if code == 500:
+                    raise TTSError("synth_failed", "本機合成程式載入失敗：" + (_err_detail(body) or "原因不明")
+                                   + self._log_hint(), 503)
+                if code is None:
+                    if proc is None:
+                        proc = self._spawn()
+                    elif proc.poll() is not None:
+                        raise TTSError("synth_failed", f"本機合成程式啟動失敗（結束碼 {proc.returncode}）" + self._log_hint(), 503)
+                elif code != 503:               # 埠號被別的程式佔用
+                    raise TTSError("synth_failed", f"本機合成的埠號 {CUDA_PORT} 被別的程式佔用（HTTP {code}）："
+                                   "可以用環境變數 JTLW_TTS_LOCAL_PORT 換一個", 503)
+                if time.monotonic() > deadline:
+                    raise TTSError("synth_failed", f"本機合成程式 {CUDA_LOAD_WAIT} 秒內沒有載入完成" + self._log_hint(), 503)
+                time.sleep(1)
+
+    @staticmethod
+    def _log_path():
+        return os.path.join(TMP_DIR, "local_tts_worker.log")
+
+    def _log_hint(self):
+        try:
+            with open(self._log_path(), encoding="utf-8", errors="replace") as f:
+                tail = [x.strip() for x in f.read().splitlines() if x.strip()][-3:]
+        except OSError:
+            tail = []
+        return ("（紀錄 " + self._log_path() + "：" + " / ".join(tail)[-300:] + "）") if tail else ""
+
+    def _spawn(self):
+        """跟啟動它的程式脫鉤：WebUI 預先叫醒的，主程式朗讀時接著用；Windows 不開主控台視窗"""
+        os.makedirs(TMP_DIR, exist_ok=True)
+        # PYTHONUTF8：g2pw 開它的字表沒指定編碼，Windows 預設是 cp1252／cp950，載入就失敗（2026-11-03 PC-004 實測；Linux、Mac 預設 UTF-8 沒事）
+        env = dict(os.environ, JT_TTS_DIR=DATA_DIR, JT_TTS_WORKER_IDLE=str(CUDA_IDLE), PYTHONIOENCODING="utf-8",
+                   PYTHONUTF8="1", PYTHONUNBUFFERED="1")
+        kw = dict(stdin=subprocess.DEVNULL, stderr=subprocess.STDOUT, cwd=ROOT, env=env)
+        if os.name == "nt":
+            kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x08000000      # CREATE_NO_WINDOW
+        else:
+            kw["start_new_session"] = True
+        with open(self._log_path(), "w", encoding="utf-8") as log:
+            return subprocess.Popen([_cuda_python(), self.server, "--tts-worker", str(CUDA_PORT)], stdout=log, **kw)
+
+    def _post(self, path, req, timeout=600):
+        for attempt in (1, 2):
+            self._ensure()
+            try:
+                return _http("POST", self._base() + path, json.dumps(req).encode(), {"Content-Type": "application/json"},
+                             timeout=timeout)
+            except (urllib.error.URLError, ConnectionError) as e:
+                # 剛好碰到它閒置結束（查完 /health 才結束）：重開一次
+                if attempt == 2:
+                    raise TTSError("synth_failed", f"本機合成程式沒有回應（{type(e).__name__}）" + self._log_hint(), 503)
+            except OSError as e:                # 逾時
+                raise TTSError("synth_failed", f"本機合成程式沒有回應（{type(e).__name__}）" + self._log_hint(), 503)
+
+    def synth(self, text, voice, custom, steps=None, lang="zh"):
+        """一段 → (WAV 位元組, 送進模型的文字)。擴散步數固定 10（同 GPU 伺服器；Mac 的 6／10 不套用）"""
+        req = {"text": text, "voice_wav": os.path.abspath(voice["wav"]), "voice_text": voice["transcript"],
+               "custom": custom or {}, "steps": 10}
+        if lang != "zh":
+            req["lang"] = lang
+        code, body, headers = self._post("/synthesize", req)
+        if code != 200:
+            raise TTSError("synth_failed", "本機合成失敗：" + (_err_detail(body) or f"HTTP {code}"), 503 if code == 503 else 502)
+        sp = {k.lower(): v for k, v in headers.items()}.get("x-tts-spoken", "")
+        return body, urllib.parse.unquote(sp)
+
+    def convert(self, text, custom):
+        code, body, _ = self._post("/convert", {"text": text, "custom": custom or {}})
+        if code != 200:
+            raise TTSError("convert_failed", "台灣念法轉換失敗：" + (_err_detail(body) or f"HTTP {code}"), 502)
+        return json.loads(body).get("spoken", "")
+
+
 _PICK_CACHE = {"t": 0.0, "key": None, "val": None}
 
 
 def pick_provider(cfg, refresh=False, where=None, steps=None, model=None):
-    """(provider, None) 或 (None, 原因)。auto：GPU 伺服器優先，其次 Apple Silicon 本機。結果快取 30 秒。
-    where（auto／remote／mlx）、steps 給的話蓋過設定檔（命令列 --tts-provider、--tts-steps）。
+    """(provider, None) 或 (None, 原因)。auto：GPU 伺服器優先，其次本機 NVIDIA 顯示卡（beta）、Apple Silicon 本機。結果快取 30 秒。
+    where（auto／remote／cuda／mlx）、steps 給的話蓋過設定檔（命令列 --tts-provider、--tts-steps）。
     model：合成模型（MODELS），預設 VoxCPM2；BreezyVoice 只在 GPU 伺服器，不退回本機"""
     s = settings(cfg)
     model = model or DEFAULT_MODEL
@@ -484,9 +612,11 @@ def pick_provider(cfg, refresh=False, where=None, steps=None, model=None):
         s["provider"] = where
     if steps:
         s["mac_steps"] = int(steps)
+    if s["provider"] not in ("auto", "remote", "cuda", "mlx"):
+        s["provider"] = "auto"
     if "mlx" not in MODELS[model]["where"]:
-        if s["provider"] == "mlx":
-            return None, f"{MODELS[model]['label']}只在 GPU 伺服器提供（Apple Silicon 本機合成要約 6 倍時間，不提供）"
+        if s["provider"] in ("mlx", "cuda"):
+            return None, f"{MODELS[model]['label']}只在 GPU 伺服器提供（本機不提供）"
         s["provider"] = "remote"
     rw = (cfg or {}).get("remote_whisper") or {}
     key = (s["provider"], rw.get("host"), rw.get("whisper_port"), s["mac_steps"], model)
@@ -508,15 +638,22 @@ def pick_provider(cfg, refresh=False, where=None, steps=None, model=None):
             reason = f"連不到 GPU 伺服器（{type(e).__name__}）"
     elif s["provider"] == "remote":
         reason = "沒有設定 GPU 伺服器" + ("" if model == DEFAULT_MODEL else f"（{MODELS[model]['label']}只在 GPU 伺服器提供）")
+    if val is None and s["provider"] in ("auto", "cuda"):
+        why = CudaProvider.unavailable()
+        if why is None:
+            val = (CudaProvider(), None)
+        elif s["provider"] == "cuda":
+            reason = why
     if val is None and s["provider"] in ("auto", "mlx"):
         why = MlxProvider.unavailable()
         val = (MlxProvider(s["mac_steps"]), None) if why is None else None
         # auto、沒設 GPU 伺服器、又不是 Apple Silicon：只說「本機只支援 Mac」會讓人以為這台永遠不能用，改說兩條路
-        if reason is None and (s["provider"] == "mlx" or not why.startswith("本機合成只支援")):
+        # （why 是 None＝可以用：v2.27.0～v2.31.8 沒擋，沒設 GPU 伺服器的 Apple Silicon Mac 在這裡 AttributeError）
+        if why is not None and reason is None and (s["provider"] == "mlx" or not why.startswith("本機合成只支援")):
             reason = why
     if val is None:
-        val = (None, reason or "這台不能自己合成語音（只支援 Apple Silicon Mac）：請在設定頁設定 GPU 伺服器，"
-                               "並在 GPU 伺服器安裝文字轉語音（重新執行安裝程式）")
+        val = (None, reason or "這台不能自己合成語音：請在設定頁設定 GPU 伺服器，並在 GPU 伺服器安裝文字轉語音（重新執行安裝程式）。"
+                               "本機合成只支援 Apple Silicon Mac，以及有 NVIDIA 顯示卡的 Windows（beta，.\\install.ps1 -LocalTTS）")
     _PICK_CACHE.update(t=time.time(), key=key, val=val)
     return val
 
