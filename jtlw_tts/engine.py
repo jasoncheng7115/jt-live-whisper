@@ -479,10 +479,111 @@ CUDA_PORT = int(os.environ.get("JTLW_TTS_LOCAL_PORT") or 19786)
 CUDA_IDLE = 600
 CUDA_READY_MARK = "jtlw-tts-ready"              # = remote_whisper_server.TTS_READY_MARK（--tts-setup 檢查通過才寫）
 CUDA_LOAD_WAIT = 300                            # 第一次載入模型最多等幾秒（GPU 伺服器約 30 秒；一般硬碟慢很多）
+# 顯示卡記憶體（v2.33.0）：2026-11-03 GPU 伺服器實測合成程式載入後佔 5.0 GB、合成 99 字最多 7.0 GB，再加 CUDA 本身的開銷
+CUDA_VRAM_NEED_GB = 8.0
+CUDA_VRAM_LOW_GB = 1.0                          # 合成中剩不到這麼多就警告：Windows 的驅動用完不會出錯，改借系統記憶體、慢很多
+VRAM_WARN_EVERY = 300                           # 同一種警告幾秒內只說一次
+_VRAM_WARN = {"cb": None, "shown": {}, "last": None}
 
 
 def _cuda_python():
     return os.path.join(CUDA_VENV, "Scripts", "python.exe") if os.name == "nt" else os.path.join(CUDA_VENV, "bin", "python")
+
+
+def set_vram_warn_handler(cb):
+    """顯示卡記憶體警告交給誰說（主程式：終端機＋WebUI）；None＝印到 stderr"""
+    _VRAM_WARN["cb"] = cb
+
+
+def last_vram_warning(max_age=600):
+    """最近一次的警告文字（WebUI 設定頁顯示用），太舊的不算"""
+    last = _VRAM_WARN["last"]
+    return last[1] if last and time.time() - last[0] < max_age else None
+
+
+def _vram_warn(key, msg):
+    now = time.monotonic()
+    if now - _VRAM_WARN["shown"].get(key, -1e9) < VRAM_WARN_EVERY:
+        return
+    _VRAM_WARN["shown"][key] = now
+    _VRAM_WARN["last"] = (time.time(), msg)
+    cb = _VRAM_WARN["cb"]
+    try:
+        cb(msg) if cb else print("[本機合成] " + msg, file=sys.stderr, flush=True)
+    except Exception:
+        pass
+
+
+def _nvidia_smi():
+    """nvidia-smi 在哪（JTLW_NVIDIA_SMI 可指定，測試用）。驅動新的都在 PATH 上；舊的在 NVSMI 資料夾（同 install.ps1 find_nvidia_smi）"""
+    env = os.environ.get("JTLW_NVIDIA_SMI")
+    if env:
+        return env
+    p = shutil.which("nvidia-smi")
+    if p:
+        return p
+    if os.name == "nt":
+        for d in (os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32"),
+                  os.path.join(os.environ.get("ProgramFiles") or r"C:\Program Files", "NVIDIA Corporation", "NVSMI")):
+            if os.path.exists(os.path.join(d, "nvidia-smi.exe")):
+                return os.path.join(d, "nvidia-smi.exe")
+    return None
+
+
+def gpu_memory():
+    """合成程式會用的那張 NVIDIA 顯示卡：{name, total_gb, used_gb, free_gb}；查不到 None。
+    有 CUDA_VISIBLE_DEVICES 時看它的第一張（torch 也是用那張），否則第 0 張"""
+    smi = _nvidia_smi()
+    if not smi:
+        return None
+    try:
+        out = subprocess.run([smi, "--query-gpu=index,name,memory.total,memory.used,memory.free",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=10,
+                             **({"creationflags": 0x08000000} if os.name == "nt" else {})).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    rows = []
+    for line in out.splitlines():
+        f = [x.strip() for x in line.split(",")]
+        if len(f) < 5:
+            continue
+        try:
+            rows.append({"index": f[0], "name": f[1], "total_gb": round(float(f[2]) / 1024, 2),
+                         "used_gb": round(float(f[3]) / 1024, 2), "free_gb": round(float(f[4]) / 1024, 2)})
+        except ValueError:
+            continue
+    if not rows:
+        return None
+    want = (os.environ.get("CUDA_VISIBLE_DEVICES") or "").split(",")[0].strip()
+    return next((r for r in rows if r["index"] == want), rows[0])
+
+
+def vram_shortage(free_gb, total_gb=None):
+    """開始合成前：剩下的放不下就回警告文字，夠就 None"""
+    if free_gb is None or free_gb >= CUDA_VRAM_NEED_GB:
+        return None
+    if total_gb is not None and total_gb < CUDA_VRAM_NEED_GB:
+        return (f"這張顯示卡只有 {total_gb:.1f} GB 記憶體，本機合成約需 {CUDA_VRAM_NEED_GB:.0f} GB：放不下，"
+                "Windows 會改借用系統記憶體，合成會慢很多（建議改用 GPU 伺服器）")
+    return (f"顯示卡記憶體只剩 {free_gb:.1f} GB（共 {total_gb:.1f} GB），本機合成約需 {CUDA_VRAM_NEED_GB:.0f} GB："
+            "可能載入失敗，或改借用系統記憶體而慢很多；請先關掉其他用到顯示卡的程式（遊戲、其他 AI 程式、本機辨識）"
+            if total_gb is not None else
+            f"顯示卡記憶體只剩 {free_gb:.1f} GB，本機合成約需 {CUDA_VRAM_NEED_GB:.0f} GB：可能載入失敗或慢很多")
+
+
+def vram_low(free_gb, total_gb=None):
+    """合成中：剩不到 CUDA_VRAM_LOW_GB 就回警告文字"""
+    if free_gb is None or free_gb >= CUDA_VRAM_LOW_GB:
+        return None
+    of = f"（共 {total_gb:.1f} GB）" if total_gb is not None else ""
+    return (f"顯示卡記憶體快用完了：只剩 {free_gb:.1f} GB{of}。Windows 會改借用系統記憶體，合成會慢很多、口譯可能跟不上；"
+            "請關掉其他用到顯示卡的程式")
+
+
+def _oom_hint(text):
+    t = str(text or "").lower()
+    return (f"（顯示卡記憶體不足：本機合成約需 {CUDA_VRAM_NEED_GB:.0f} GB，請關掉其他用到顯示卡的程式，或改用 GPU 伺服器）"
+            if "out of memory" in t or "outofmemory" in t else "")
 
 
 class CudaProvider:
@@ -505,8 +606,68 @@ class CudaProvider:
         return None
 
     def health(self):
+        """不會啟動合成程式。stream／langs：雙向口譯要的（同一支合成程式，v2.33.0 起口譯也能用本機，beta）"""
         why = self.unavailable()
-        return {"available": why is None, "reason": why}
+        if why is not None:
+            return {"available": False, "reason": why}
+        return {"available": True, "reason": None, "stream": True, "langs": ["zh", "en"], "beta": True}
+
+    def running_vram(self):
+        """合成程式在跑的話，它看到的顯示卡記憶體 {free_gb, total_gb, used_gb, peak_gb}；沒在跑或舊版沒回報 None"""
+        try:
+            code, body, _ = _http("GET", self._base() + "/health", timeout=5)
+        except (urllib.error.URLError, OSError):
+            return None
+        if code != 200:
+            return None
+        try:
+            return json.loads(body).get("vram")
+        except ValueError:
+            return None
+
+    def vram(self):
+        """現在的顯示卡記憶體：合成程式在跑就問它，不然問 nvidia-smi"""
+        v = self.running_vram()
+        if v:
+            return dict(v, source="worker")
+        g = gpu_memory()
+        return dict(g, source="nvidia-smi") if g else None
+
+    def keepalive(self):
+        """會議中很久沒人說話時，讓合成程式不要閒置結束（下一句還要重新載入，那句就被略過）。沒在跑就不管"""
+        try:
+            _http("POST", self._base() + "/ping", b"{}", {"Content-Type": "application/json"}, timeout=5)
+        except (urllib.error.URLError, OSError):
+            pass
+
+    def check_vram(self):
+        """合成中：剩不到 CUDA_VRAM_LOW_GB 就警告（同一種 5 分鐘內只說一次）。回傳 vram()"""
+        v = self.vram()
+        if v:
+            msg = vram_low(v.get("free_gb"), v.get("total_gb"))
+            if msg:
+                _vram_warn("low", msg)
+        return v
+
+    def _note_vram(self, headers):
+        h = {k.lower(): v for k, v in (headers or {}).items()}
+        try:
+            free = float(h["x-tts-vram-free"])
+            total = float(h["x-tts-vram-total"]) if h.get("x-tts-vram-total") else None
+        except (KeyError, ValueError):
+            return
+        msg = vram_low(free, total)
+        if msg:
+            _vram_warn("low", msg)
+
+    @staticmethod
+    def _precheck():
+        """要開合成程式之前：顯示卡剩的放不下就先警告（照樣試，載入失敗會再說原因）"""
+        g = gpu_memory()
+        if g:
+            msg = vram_shortage(g["free_gb"], g["total_gb"])
+            if msg:
+                _vram_warn("shortage", msg)
 
     @staticmethod
     def _base():
@@ -525,10 +686,12 @@ class CudaProvider:
                 if code == 200:
                     return
                 if code == 500:
-                    raise TTSError("synth_failed", "本機合成程式載入失敗：" + (_err_detail(body) or "原因不明")
+                    detail = _err_detail(body) or "原因不明"
+                    raise TTSError("synth_failed", "本機合成程式載入失敗：" + detail + _oom_hint(detail)
                                    + self._log_hint(), 503)
                 if code is None:
                     if proc is None:
+                        self._precheck()
                         proc = self._spawn()
                     elif proc.poll() is not None:
                         raise TTSError("synth_failed", f"本機合成程式啟動失敗（結束碼 {proc.returncode}）" + self._log_hint(), 503)
@@ -586,9 +749,50 @@ class CudaProvider:
             req["lang"] = lang
         code, body, headers = self._post("/synthesize", req)
         if code != 200:
-            raise TTSError("synth_failed", "本機合成失敗：" + (_err_detail(body) or f"HTTP {code}"), 503 if code == 503 else 502)
+            detail = _err_detail(body) or f"HTTP {code}"
+            raise TTSError("synth_failed", "本機合成失敗：" + detail + _oom_hint(detail), 503 if code == 503 else 502)
+        self._note_vram(headers)
         sp = {k.lower(): v for k, v in headers.items()}.get("x-tts-spoken", "")
         return body, urllib.parse.unquote(sp)
+
+    def synth_stream(self, text, voice, lang="zh", block=9600, custom=None):
+        """串流合成（雙向口譯，v2.33.0 beta）：一段一段產生 (PCM, 取樣率)。介面同 RemoteProvider.synth_stream"""
+        import http.client
+        req = {"text": text, "voice_wav": os.path.abspath(voice["wav"]), "voice_text": voice["transcript"],
+               "custom": custom or {}, "steps": 10}
+        if lang != "zh":
+            req["lang"] = lang
+        for attempt in (1, 2):
+            self._ensure()
+            conn = http.client.HTTPConnection("127.0.0.1", CUDA_PORT, timeout=120)
+            try:
+                conn.request("POST", "/synthesize_stream", json.dumps(req), {"Content-Type": "application/json"})
+                r = conn.getresponse()
+            except (ConnectionError, http.client.HTTPException) as e:
+                conn.close()                    # 剛好碰到它閒置結束：重開一次
+                if attempt == 2:
+                    raise TTSError("synth_failed", f"本機合成程式沒有回應（{type(e).__name__}）" + self._log_hint(), 503)
+                continue
+            except OSError as e:                # 逾時
+                conn.close()
+                raise TTSError("synth_failed", f"本機合成程式沒有回應（{type(e).__name__}）" + self._log_hint(), 503)
+            break
+        try:
+            if r.status != 200:
+                detail = _err_detail(r.read()) or f"HTTP {r.status}"
+                raise TTSError("synth_failed", "本機串流合成失敗：" + detail + _oom_hint(detail),
+                               503 if r.status in (404, 405, 503) else 502)
+            self._note_vram(dict(r.getheaders()))
+            sr = int(r.getheader("X-TTS-SR") or 48000)
+            while True:
+                b = r.read(block)
+                if not b:
+                    break
+                if len(b) % 2:                  # 16-bit：湊成整數個樣本
+                    b += r.read(1)
+                yield b, sr
+        finally:
+            conn.close()
 
     def convert(self, text, custom):
         code, body, _ = self._post("/convert", {"text": text, "custom": custom or {}})
@@ -656,6 +860,22 @@ def pick_provider(cfg, refresh=False, where=None, steps=None, model=None):
                                "本機合成只支援 Apple Silicon Mac，以及有 NVIDIA 顯示卡的 Windows（beta，.\\install.ps1 -LocalTTS）")
     _PICK_CACHE.update(t=time.time(), key=key, val=val)
     return val
+
+
+def pick_interp_provider(cfg, refresh=True):
+    """雙向口譯的合成 → (provider, None) 或 (None, 原因)。GPU 伺服器優先；沒有能用的 GPU 伺服器時，
+    裝了本機 NVIDIA 合成（beta）就用本機（v2.33.0）。設定的合成位置是本機 NVIDIA（cuda）時先用本機。
+    Apple Silicon 本機不用：合成大約跟說話一樣快，兩個方向再加上辨識預估跟不上"""
+    order = ("cuda", "remote") if settings(cfg)["provider"] == "cuda" else ("remote", "cuda")
+    why = {}
+    for where in order:
+        p, why[where] = pick_provider(cfg, refresh=refresh, where=where)
+        if p is not None:
+            return p, None
+    msg = why["remote"] or "GPU 伺服器不能合成"
+    if os.name == "nt":
+        msg += "；本機 NVIDIA 顯示卡（beta）：" + (why["cuda"] or "不能用")
+    return None, msg
 
 
 # ── 要朗讀的文字 ───────────────────────────────────────────────

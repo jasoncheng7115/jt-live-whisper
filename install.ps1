@@ -788,6 +788,27 @@ function find_nvidia_smi {
     return ""
 }
 
+# 顯示卡記憶體（v2.33.0）：本機合成實測最多用到約 7 GB（GPU 伺服器量的），加上 CUDA 本身的開銷要 8 GB；不夠只提醒、照樣可以裝
+$LOCAL_TTS_VRAM_GB = 8
+function nvidia_vram($smi) {
+    try {
+        $line = (& $smi --query-gpu=name,memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+        $f = "$line".Split(",")
+        if ($f.Count -ge 2) { return @{ name = $f[0].Trim(); gb = [math]::Round([double]$f[1].Trim() / 1024, 1) } }
+    } catch { }
+    return $null
+}
+
+function show_vram($smi) {
+    $v = nvidia_vram $smi
+    if (-not $v) { return }
+    if ($v.gb -lt $LOCAL_TTS_VRAM_GB) {
+        check_warn "顯示卡 $($v.name) 只有 $($v.gb) GB 記憶體，本機合成約需 $LOCAL_TTS_VRAM_GB GB：放不下時 Windows 會改借用系統記憶體，合成會慢很多（建議改用 GPU 伺服器）"
+    } else {
+        info "顯示卡：$($v.name)，記憶體 $($v.gb) GB（本機合成約需 $LOCAL_TTS_VRAM_GB GB；同時用顯示卡辨識或跑其他程式時，使用中會提醒）"
+    }
+}
+
 function local_tts_ready {
     return ((Test-Path (Join-Path $LOCAL_TTS_VENV "jtlw-tts-ready")) -and (Test-Path (Join-Path $SCRIPT_DIR "tts_data\moe_words.tsv")))
 }
@@ -804,6 +825,7 @@ function install_local_tts {
         check_fail "找不到 NVIDIA 顯示卡（nvidia-smi）：本機合成需要 NVIDIA 顯示卡與驅動；沒有的話請用 GPU 伺服器"
         return $false
     }
+    show_vram $smi
     $savedPath = $env:PATH
     $env:PATH = (Split-Path $smi) + ";" + $env:PATH          # 安裝程式自己找 nvidia-smi
     $env:JT_TTS_VENV = $LOCAL_TTS_VENV
@@ -820,6 +842,7 @@ function install_local_tts {
     if ($rc -eq 0 -and (local_tts_ready)) {
         check_ok "本機文字轉語音（beta）安裝完成"
         info "WebUI 選「文字內容朗讀」，合成位置選「本機（NVIDIA 顯示卡，beta）」；有 GPU 伺服器時預設仍用 GPU 伺服器"
+        info "雙向語音口譯：沒有 GPU 伺服器時也會用它合成（beta）"
         info "移除：刪掉安裝資料夾裡的 venv-tts"
         return $true
     }
@@ -831,10 +854,12 @@ function offer_local_tts {
     if ([Console]::IsInputRedirected) { return }
     if ($env:JTLW_UPGRADE_QUIET) { return }
     if (local_tts_ready) { return }
-    if (-not (find_nvidia_smi)) { return }
+    $smi = find_nvidia_smi
+    if (-not $smi) { return }
     section "本機文字轉語音（NVIDIA 顯示卡，beta，選用）"
-    Write-Host "  ${C_WHITE}朗讀在這台的 NVIDIA 顯示卡上合成，不用 GPU 伺服器（有 GPU 伺服器的話不必裝）${NC}"
-    Write-Host "  ${C_DIM}  beta：還沒有在各種顯示卡上實測；需要約 20 GB 磁碟、建議 8 GB 以上顯示記憶體${NC}"
+    Write-Host "  ${C_WHITE}朗讀與雙向語音口譯在這台的 NVIDIA 顯示卡上合成，不用 GPU 伺服器（有 GPU 伺服器的話不必裝）${NC}"
+    Write-Host "  ${C_DIM}  beta：還沒有在各種顯示卡上實測；需要約 20 GB 磁碟、8 GB 以上顯示卡記憶體${NC}"
+    show_vram $smi
     Write-Host "  ${C_DIM}  之後要裝：.\install.ps1 -LocalTTS${NC}"
     $ans = Read-Host "  是否安裝本機文字轉語音（beta）？(y/N)"
     if ("$ans" -notmatch '^[Yy]') {
@@ -922,7 +947,7 @@ $banner_line = '=' * $cols
 if (-not $env:JTLW_UPGRADE_REPO) {          # 升級時交給新版接手的那一次不再印標題（同一個畫面）
 Write-Host ""
 Write-Host "${C_TITLE}${banner_line}${NC}"
-Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.32.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
+Write-Host "${C_TITLE}${BOLD}  jt-live-whisper v2.33.0 - 100% 全地端 AI 語音工具箱 - Windows 安裝程式${NC}"
 Write-Host "${C_TITLE}  by Jason Cheng (Jason Tools)${NC}"
 Write-Host "${C_TITLE}${banner_line}${NC}"
 Write-Host ""

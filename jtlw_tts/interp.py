@@ -344,6 +344,10 @@ class Interpreter:
         with self._cv:
             return len(self._q.get(lane, ()))
 
+    def wait_stop(self, timeout):
+        """等到 stop() 或逾時；停了回 True（背景監看用）"""
+        return self._stop.wait(timeout)
+
     def stop(self, wait=2.0):
         self._stop.set()
         with self._cv:

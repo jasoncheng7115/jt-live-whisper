@@ -226,7 +226,7 @@ cd C:\jt-live-whisper
 <pre><span class="c"># GPU 伺服器（NVIDIA）：執行 ./install.sh 設定 GPU 伺服器時回答「是」，或在伺服器上</span>
 cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --tts-setup
 <span class="c"># Apple Silicon Mac 本機：./install.sh 問「要在這台 Mac 安裝文字轉語音嗎？」時回答「是」</span>
-<span class="c"># Windows＋NVIDIA 顯示卡本機（beta，v2.32.0 起，約 20 GB）：在安裝資料夾執行</span>
+<span class="c"># Windows＋NVIDIA 顯示卡本機（beta，v2.32.0 起，約 20 GB 磁碟、8 GB 以上顯示卡記憶體；v2.33.0 起口譯也能用）：在安裝資料夾執行</span>
 .\install.ps1 -LocalTTS
 <span class="c"># 選用 BreezyVoice（台灣口音，但合成速度慢，不適合即時；只在 GPU 伺服器）：安裝或升級時問到「是否加裝 BreezyVoice？」回答 y，或在伺服器上</span>
 cd ~/jt-whisper-server &amp;&amp; venv/bin/python3 server.py --breezy-setup

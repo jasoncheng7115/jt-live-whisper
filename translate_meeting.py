@@ -2748,7 +2748,7 @@ ASR_ENGINES = [
     ("moonshine", "Moonshine", "真串流，低延遲，僅英文"),
 ]
 
-APP_VERSION = "2.32.0"
+APP_VERSION = "2.33.0"
 
 # faster-whisper 離線辨識參數（含長音檔幻覺防護）— 標準模式
 # - condition_on_previous_text=False：切斷上一段 prompt 傳染，避免一個短句卡住後幻覺自我強化
@@ -10119,7 +10119,8 @@ def run_stream_bidirectional(lb_device_id, mic_device_id,
         if getattr(interp, "passthrough", None) is not None:
             interp.passthrough.start()
         _names = {"me": "念給我聽（中文）", "them": "念給對方聽（英文）"}
-        _how = "GPU 伺服器串流合成" if interp.streaming else getattr(interp.provider, "label", "")
+        _cuda = getattr(interp.provider, "kind", "") == "cuda"
+        _how = (getattr(interp.provider, "label", "") if _cuda else "GPU 伺服器") + ("串流合成" if interp.streaming else "")
         print(f"{C_DIM}語音口譯：{'、'.join(_names[k] for k in interp.lanes)}｜{_how}｜"
               f"念過的句子 20 秒內被錄回來會自動略過；請戴耳機{RESET}")
         if _I.THEM in interp.lanes:
@@ -12596,17 +12597,22 @@ def _interp_build(args, mode, pause_ev=None):
         return None, f"語音口譯元件不完整（{type(e).__name__}: {e}）：請再執行一次升級"
     cfg = load_config()
     s = T.settings(cfg)
-    # 合成只用 GPU 伺服器：Apple Silicon 本機合成約跟說話一樣快，兩個方向加上辨識跟不上（規格第一節）
-    prov, why = T.pick_provider(cfg, refresh=True, where="remote")
+    # 合成在 GPU 伺服器；沒有能用的 GPU 伺服器時，裝了本機 NVIDIA 合成就用本機（beta，v2.33.0）。
+    # Apple Silicon 本機不用：合成約跟說話一樣快，兩個方向加上辨識跟不上（規格第一節）
+    prov, why = T.pick_interp_provider(cfg)
     if prov is None:
-        return None, f"語音口譯要在 GPU 伺服器合成：{why}"
+        return None, f"語音口譯要在 GPU 伺服器{'或本機 NVIDIA 顯示卡（beta）' if IS_WINDOWS else ''}合成：{why}"
+    if getattr(prov, "kind", "") == "cuda":
+        print(f"{C_HIGHLIGHT}  [語音口譯] 合成用{prov.label}：beta，還沒在 Windows＋NVIDIA 實機開會測過；"
+              f"顯示卡記憶體約需 {T.engine.CUDA_VRAM_NEED_GB:.0f} GB，不夠時會提醒{RESET}", flush=True)
+        _tts_vram_notice(T, prov)
     try:
         health = prov.health()
     except Exception:
         health = {}
     stream = bool(health.get("stream"))
     if args.speak_them and "en" not in (health.get("langs") or ()):
-        # v2.27.0 的伺服器不認得 lang=en：英文句子會套台灣念法、數字念成中文，念給對方聽一定錯
+        # v2.27.0 的伺服器不認得 lang=en：英文句子會套台灣念法、數字念成中文，念給對方聽一定錯（本機 NVIDIA 是同一版程式，一定認得）
         return None, (f"GPU 伺服器的版本太舊（{health.get('version') or '不明'}），念不對英文：念給對方聽要 v2.28.0 以上的伺服器"
                       "（設定了自動更新密鑰會自己更新，否則請在 GPU 伺服器更新 server.py）")
     if args.speak_them and IS_WINDOWS and str(args.speak_them).strip().lower() != "auto":
@@ -12670,11 +12676,20 @@ def _interp_build(args, mode, pause_ev=None):
                     pace.update(time.monotonic() - t0, len(raw) / 2 / sr0)
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"[:160]
+        cuda = getattr(prov, "kind", "") == "cuda"
+        where = prov.label if cuda else "GPU "
         with _interp_print_lock:
             if err is None:
-                print(f"{C_DIM}  [語音口譯] GPU 語音合成已就緒{RESET}", flush=True)
+                print(f"{C_DIM}  [語音口譯] {where}語音合成已就緒{RESET}", flush=True)
             else:                                               # 以前失敗也印「已就緒」
-                print(f"{C_HIGHLIGHT}  [語音口譯] GPU 語音合成沒有準備好：{err}（會議中每一句會再試）{RESET}", flush=True)
+                print(f"{C_HIGHLIGHT}  [語音口譯] {where}語音合成沒有準備好：{err}（會議中每一句會再試）{RESET}", flush=True)
+        if cuda:
+            # 本機合成程式閒置 10 分鐘自己結束：會議中很久沒人說話也要留著（重新載入要好幾十秒，那句就被略過）；
+            # 順便每分鐘看顯示卡記憶體（本機辨識、其他程式也在用同一張卡）
+            prov.check_vram()
+            while not ip.wait_stop(60):
+                prov.keepalive()
+                prov.check_vram()
 
     audio = _InterpAudio(devices, pause_ev)
     ip = I.Interpreter(lanes, synth, audio.play, on_event=_interp_event)
@@ -12721,15 +12736,16 @@ def _ask_interp(args, mode):
         return
     try:
         import jtlw_tts as T
-        prov, why = T.pick_provider(load_config(), refresh=True, where="remote")
+        prov, why = T.pick_interp_provider(load_config())
     except Exception as e:
         prov, why = None, f"{type(e).__name__}: {e}"
     if prov is None:
         if REMOTE_WHISPER_CONFIG:
-            print(f"\n{C_DIM}（語音口譯要在 GPU 伺服器合成，現在不能用：{why}）{RESET}")
+            print(f"\n{C_DIM}（語音口譯要在 GPU 伺服器{'或本機 NVIDIA 顯示卡（beta）' if IS_WINDOWS else ''}合成，現在不能用：{why}）{RESET}")
         return
     print(f"\n{C_TITLE}{BOLD}▎ 語音口譯{RESET}")
-    print(f"  {C_DIM}把譯文念出來：對方的英文翻成中文念給你聽、你的中文翻成英文念給對方聽（合成在 GPU 伺服器）。{RESET}")
+    print(f"  {C_DIM}把譯文念出來：對方的英文翻成中文念給你聽、你的中文翻成英文念給對方聽"
+          f"（合成在{prov.label if getattr(prov, 'kind', '') == 'cuda' else 'GPU 伺服器'}）。{RESET}")
     if _DEFMIC["on"]:
         print(f"  {C_DIM}請戴耳機；念給對方聽時，口譯期間系統預設麥克風自動切到虛擬麥克風、結束切回，"
               f"會議軟體的麥克風設成「與系統相同／預設」即可（任何線上會議軟體都能用）。{RESET}")
@@ -13051,6 +13067,18 @@ def _interp_reject_lang(interp, passthrough, length_ms):
     return None
 
 
+def _tts_vram_notice(T, prov, lock=None):
+    """本機 NVIDIA 合成（beta）的顯示卡記憶體警告（v2.33.0）：終端機＋WebUI（toast）。其他合成位置不用"""
+    if getattr(prov, "kind", "") != "cuda":
+        return
+
+    def say(msg):
+        with (lock or _interp_print_lock):
+            print(f"{C_HIGHLIGHT}  [本機合成] {msg}{RESET}", flush=True)
+        _webui_send({"type": "notice", "level": "warn", "message": "本機合成：" + msg})
+    T.set_vram_warn_handler(say)
+
+
 def _interp_event(e, lock=None):
     """口譯的進度給 WebUI（每句標「排隊／念出／略過／取消／失敗」）；失敗與略過在終端機也說。
     同樣的失敗 60 秒內只說一次（GPU 伺服器斷線時每一句都會失敗，不要洗版）。
@@ -13263,6 +13291,7 @@ def run_tts(args):
     prov, why = T.pick_provider(cfg, refresh=True, where=args.tts_provider, steps=args.tts_steps, model=model)
     if not prov:
         _tts_fail(why)
+    _tts_vram_notice(T, prov)
     model_label = T.MODELS[model]["label"]
     dev, dev_label = None, "系統預設"
     if not file_only and not browser:
@@ -18826,7 +18855,7 @@ def parse_args():
     tts.add_argument("--tts-start", type=int, default=1, metavar="N",
                      help="從第 N 段開始念（重念；預設 1）")
     tts.add_argument("--tts-list", action="store_true", help="列出聲音與播放裝置後離開")
-    ip = parser.add_argument_group("雙向語音口譯（v2.28.0，英中雙向 --mode en_zh；合成只在 GPU 伺服器）")
+    ip = parser.add_argument_group("雙向語音口譯（v2.28.0，英中雙向 --mode en_zh；合成在 GPU 伺服器，Windows 也可用本機 NVIDIA 顯示卡（beta）；Mac 本機不提供）")
     ip.add_argument("--speak-me", metavar="DEV", default=None,
                     help="對方說的英文翻成中文後念給我聽：播放裝置（default＝系統預設、裝置編號或名稱的一部分；請用耳機）")
     ip.add_argument("--speak-them", metavar="DEV", default=None,

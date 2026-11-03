@@ -1233,7 +1233,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.32.0",
+        "last": last, "version": "2.33.0",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -2094,7 +2094,40 @@ def _interp_them_info(devices):
     return {"supported": False, "note": _TM_INTERP_WIN_NEED}
 
 
-_TTS_WHERE = ("auto", "remote", "cuda", "mlx")       # 合成位置（cuda＝本機 NVIDIA 顯示卡，beta，v2.32.0）
+_TTS_WHERE = ("auto", "remote", "cuda", "mlx")
+_VRAM_CACHE = {"t": 0.0, "val": None}
+
+
+def _cuda_vram_info(prov):
+    """本機 NVIDIA（beta，v2.33.0）：顯示卡記憶體與警告（設定頁合成位置下面、口譯區顯示）。
+    nvidia-smi 在 Windows 要零點幾秒：10 秒內重用；合成程式在跑時看它回報的（它自己佔的已經算在裡面）"""
+    now = time.monotonic()
+    if now - _VRAM_CACHE["t"] > 10:
+        try:
+            _VRAM_CACHE["val"] = prov.vram()
+        except Exception:
+            _VRAM_CACHE["val"] = None
+        _VRAM_CACHE["t"] = now
+    v = _VRAM_CACHE["val"]
+    if not v:
+        return {"vram": None, "warn": _tts.last_vram_warning()}
+    warn = _tts.engine.vram_low(v.get("free_gb"), v.get("total_gb")) if v.get("source") == "worker" \
+        else _tts.engine.vram_shortage(v.get("free_gb"), v.get("total_gb"))
+    return {"vram": v, "warn": warn or _tts.last_vram_warning()}
+
+
+def _interp_synth_info(cfg, refresh=False):
+    """雙向口譯會在哪裡合成（同主程式 _interp_build：GPU 伺服器優先，沒有時本機 NVIDIA，beta）"""
+    try:
+        prov, why = _tts.pick_interp_provider(cfg, refresh=refresh)
+    except Exception as e:
+        return {"available": False, "reason": f"{type(e).__name__}: {e}"}
+    if prov is None:
+        return {"available": False, "reason": why}
+    out = {"available": True, "kind": prov.kind, "label": prov.label, "beta": prov.kind == "cuda"}
+    if prov.kind == "cuda":
+        out["warn"] = _cuda_vram_info(prov)["warn"]
+    return out       # 合成位置（cuda＝本機 NVIDIA 顯示卡，beta，v2.32.0）
 
 
 def _tts_info(admin, refresh=False):
@@ -2113,7 +2146,10 @@ def _tts_info(admin, refresh=False):
                 + ((("cuda", _tts.CudaProvider.label),) if os.name == "nt" or _tts.CudaProvider.unavailable() is None else ()) \
                 + (("mlx", "本機（Apple Silicon）"),):
             prov, why = _tts.pick_provider(cfg, refresh=refresh, where=where, model=key)
-            mlocs.append({"value": where, "label": label, "available": prov is not None, "reason": why})
+            loc = {"value": where, "label": label, "available": prov is not None, "reason": why}
+            if where == "cuda" and prov is not None:
+                loc.update(_cuda_vram_info(prov))
+            mlocs.append(loc)
         models.append({"value": key, "label": m["label"], "tag": m["tag"], "note": m["note"], "default": key == _tts.DEFAULT_MODEL,
                        "available": any(x["available"] for x in mlocs), "locations": mlocs})
     locs = next(m["locations"] for m in models if m["default"])
@@ -2122,7 +2158,7 @@ def _tts_info(admin, refresh=False):
         devices = _tm_tts_output_devices() if _tm_tts_output_devices else []
     except Exception:
         devices = []
-    out = {"installed": True, "locations": locs,
+    out = {"installed": True, "locations": locs, "interp_synth": _interp_synth_info(cfg, refresh),
            "models": models,
            "voices": voices, "voice": _tts.default_voice_id(cfg),
            # 雙向語音口譯（v2.28.0）：念英文給對方聽的聲音、Linux 可以自動建立虛擬麥克風

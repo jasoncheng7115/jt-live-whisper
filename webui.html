@@ -313,7 +313,7 @@ body.dark .ver-warn{background:#3a2f0b;color:#ffda6a;border-color:#665216}
     <div class="ip-need no" id="ttsMissing" style="display:none"></div>
     <div class="fg"><label>功能模式</label><div class="csel" id="iTtsMode" data-value=""></div></div>
     <div class="fg"><label>合成模型</label><div class="csel" id="iTtsModel" data-value=""></div><div class="tts-note" id="ttsModelNote"></div></div>
-    <div class="fg"><label>合成位置</label><div class="csel" id="iTtsWhere" data-value=""></div></div>
+    <div class="fg"><label>合成位置</label><div class="csel" id="iTtsWhere" data-value=""></div><div class="tts-note" id="ttsWhereNote"></div></div>
     <div class="fg" id="rTtsSteps"><label>本機品質</label><div class="csel" id="iTtsSteps" data-value=""></div></div>
     <div class="fg"><label>聲音</label><div class="csel" id="iTtsVoice" data-value=""></div>
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap" id="ttsAdminBtns"><button type="button" class="test-btn btn-ic" onclick="ttsVoiceDlg()" style="height:32px"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg>管理聲音</button><button type="button" class="test-btn btn-ic" onclick="ttsDictDlg()" style="height:32px"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>發音字典</button></div></div>
@@ -358,7 +358,8 @@ body.dark .ver-warn{background:#3a2f0b;color:#ffda6a;border-color:#665216}
   <!-- 雙向語音口譯（v2.28.0）：英中雙向即時才顯示 -->
   <div class="sec" id="rInterp" style="display:none">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>語音口譯</div>
-    <div class="sec-hint">把譯文念出來：對方說的英文翻成中文念給你聽、你說的中文翻成英文念給對方聽（合成在 GPU 伺服器）。<b>請戴耳機</b>；念給對方聽時，口譯期間系統預設麥克風自動切到虛擬麥克風、結束切回，會議軟體的麥克風設成「與系統相同／預設」就會跟著切換。</div>
+    <div class="sec-hint">把譯文念出來：對方說的英文翻成中文念給你聽、你說的中文翻成英文念給對方聽（合成在 GPU 伺服器；Windows 沒有 GPU 伺服器時可用本機 NVIDIA 顯示卡，beta）。<b>請戴耳機</b>；念給對方聽時，口譯期間系統預設麥克風自動切到虛擬麥克風、結束切回，會議軟體的麥克風設成「與系統相同／預設」就會跟著切換。</div>
+    <div class="ip-need" id="iInterpSynth" style="display:none"></div>
     <div class="checks"><label><input type="checkbox" id="iInterpMe" onchange="interpVis()"> 念給我聽（中文）</label></div>
     <div class="row2" id="rInterpMe"><div class="fg"><label>播放裝置（耳機）</label><div class="csel" id="iInterpMeDev" data-value=""></div></div><div class="fg"><label>聲音</label><div class="csel" id="iInterpMeVoice" data-value=""></div></div></div>
     <div class="checks"><label><input type="checkbox" id="iInterpThem" onchange="interpVis()"> 念給對方聽（英文）</label></div>
@@ -671,7 +672,7 @@ function _recStopped(ev){
   _recBadge('錄音已停止（磁碟空間不足）',true);showToast(msg,'err');$('bInfo').textContent=msg;
   const p=_recPanel();if(p)p.innerHTML='<div class="rp-size">'+_fmtBytes(ev.bytes)+'</div><div class="rp-file">'+esc(ev.path||'')+'</div><div class="rp-stop">'+esc(msg)+'</div>';
 }
-function showToast(msg,type){const t=document.createElement('div');t.className='toast toast-'+(type||'err');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},4000)}
+function showToast(msg,type,ms){const t=document.createElement('div');t.className='toast toast-'+(type||'err');t.textContent=msg;document.body.appendChild(t);setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},ms||4000)}
 function bc(s){return s<2?'bf':s<5?'bm':'bs'}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML}
 function _attr(s){return esc(s==null?'':s).replace(/"/g,'&quot;')}
@@ -701,7 +702,7 @@ async function loadCfg(){
   if(!(c.api_level>=2))_verWarn();_ipRateDef=c.interp_rate_default||null;
   cselSetItems($('iSource'),[{value:'live',label:'即時音訊擷取',tag:''},{value:'file',label:'讀入音訊檔案（離線處理）',tag:''},{value:'tts',label:'文字內容朗讀',tag:''},{value:'tts_file',label:'文字轉語音檔',tag:''}]);
   cselSetValue($('iSource'),['live','file','tts','tts_file'].includes(L.source)?L.source:'live');$('iSource').addEventListener('change',onSourceChg);
-  _ttsLast=L;ttsFill(c.tts);interpFill(c.tts,L);$('iTtsWhere').addEventListener('change',()=>{$('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none';ttsWarm()});$('iTtsModel').addEventListener('change',()=>{if(_ttsInfo)_ttsFillWhere(_ttsInfo,cselVal($('iTtsWhere')));ttsWarm()});
+  _ttsLast=L;ttsFill(c.tts);interpFill(c.tts,L);$('iTtsWhere').addEventListener('change',()=>{$('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none';_ttsWhereNote();ttsWarm()});$('iTtsModel').addEventListener('change',()=>{if(_ttsInfo)_ttsFillWhere(_ttsInfo,cselVal($('iTtsWhere')));ttsWarm()});
   // Mode
   const mG=[];let lg='',cg;c.modes.forEach(m=>{if(m.group!==lg){cg={label:m.group,items:[]};mG.push(cg);lg=m.group}cg.items.push({value:m.value,label:m.label,tag:tagFor(m.value,'en2zh',L.mode)})});
   cselSetItems($('iMode'),null,mG);cselSetValue($('iMode'),L.mode||'en2zh');
@@ -1169,7 +1170,7 @@ function _renderMsg(ev){dot.classList.add('on');if(cnt===0)$('bInfo').textConten
   if(aScr)requestAnimationFrame(()=>{msgsEl.scrollTop=msgsEl.scrollHeight})}
 /* WS */
 function conn(){const p=location.protocol==='https:'?'wss:':'ws:';const _wsUrl=p+'//'+location.host+'/ws'+(_authToken?'?token='+encodeURIComponent(_authToken):'');ws=new WebSocket(_wsUrl);ws.onopen=()=>{if(rTimer){clearInterval(rTimer);rTimer=null}};
-  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){if(ev.pid)_curPid=ev.pid;curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(_ttsReplayKeep!==null){_ttsReplayKeep=null}else if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){_ttsAudioReset();if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;if(ev.pid&&_curPid&&ev.pid!==_curPid)return;_ttsAudioReset();dot.classList.remove('on');_discDetail=ev.detail||'';showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='tts_info'){_ttsLiveInfo(ev)}else if(ev.type==='tts_audio'){_ttsOnAudio(ev)}else if(ev.type==='interp'){_ipOnEvent(ev)}else if(ev.type==='interp_rate'){_ipRate[ev.lane]=ev.rate;_ipRateShow(ev.lane)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
+  ws.onmessage=e=>{try{const ev=JSON.parse(e.data);if(ev.type==='transcription')addMsg(ev);else if(ev.type==='started'){if(ev.pid)_curPid=ev.pid;curCfg.modeLabel=_modeLabels[ev.mode]||ev.mode;curCfg.mode=ev.mode;if(_ttsReplayKeep!==null){_ttsReplayKeep=null}else if(!_isSwitching){showLive()}dot.classList.add('on')}else if(ev.type==='stopped'&&!_isSwitching){_ttsAudioReset();if(curCfg.isFile){showSetup()}else{showDisconnected(_stopTitle())}}else if(ev.type==='disconnected'){if(_isSwitching)return;if(ev.pid&&_curPid&&ev.pid!==_curPid)return;_ttsAudioReset();dot.classList.remove('on');_discDetail=ev.detail||'';showDisconnected(ev.user_stop&&ev.rc===0?_stopTitle():(ev.message||'主程式已結束'),true)}else if(ev.type==='switching'){$('bInfo').textContent=ev.message||'切換中...'}else if(ev.type==='rms'&&ev.value!=null)pushVol(ev.value);else if(ev.type==='rec_size')_recSize(ev);else if(ev.type==='rec_stopped')_recStopped(ev);else if(ev.type==='output_files'){_outputFiles=ev.files||[];_outputDirs=ev.dirs||[];_renderDisc()}else if(ev.type==='keyword_alert'){_handleKeywordAlert(ev)}else if(ev.type==='tts_info'){_ttsLiveInfo(ev)}else if(ev.type==='tts_audio'){_ttsOnAudio(ev)}else if(ev.type==='interp'){_ipOnEvent(ev)}else if(ev.type==='interp_rate'){_ipRate[ev.lane]=ev.rate;_ipRateShow(ev.lane)}else if(ev.type==='correction'){addCorrection(ev)}else if(ev.type==='notice'){showToast(ev.message||'',ev.level==='warn'?'warn':'err',12000)}else if(ev.type==='progress'){$('bInfo').textContent=ev.stage+(ev.detail?' — '+ev.detail:'');if(ev.finishing){const b=$('stopBtn');if(b.disabled)b.textContent='存檔中...'}}}catch(x){}};
   ws.onclose=()=>{dot.classList.remove('on');if($('pLive').classList.contains('on')&&!_discShown){_discShown=true;showDisconnected('與伺服器的連線已中斷')}if(!rTimer)rTimer=setInterval(()=>{if(!ws||ws.readyState===WebSocket.CLOSED)conn()},3000)};ws.onerror=()=>ws.close()}
 // Tooltips
 const _tips={
@@ -1617,6 +1618,11 @@ function interpFill(info,L){
   const it=info.interp_them||{},ne=$('iInterpThemNeed');
   if(it.supported===false){ne.className='ip-need no';ne.textContent=it.note||'';L=Object.assign({},L,{interp_them:false});$('iInterpThem').disabled=true}
   else{$('iInterpThem').disabled=false;ne.className='ip-need '+(it.warn?'warn':(it.auto||it.found?'ok':'warn'));ne.textContent=it.auto?(it.note||''):it.found?(it.found_note||''):'念給對方聽'+(it.need||'')}
+  /* 口譯在哪裡合成：GPU 伺服器、本機 NVIDIA（beta，v2.33.0；顯示卡記憶體不夠時警告）、都不能用時說原因 */
+  const sy=info.interp_synth,se=$('iInterpSynth');
+  if(sy){se.style.display='';se.className='ip-need '+(!sy.available?'no':(sy.beta||sy.warn?'warn':'ok'));
+    se.textContent=!sy.available?'語音口譯現在不能合成：'+(sy.reason||''):'口譯合成：'+sy.label+(sy.beta?'（beta：還沒在 Windows＋NVIDIA 實機開會測過）':'')+(sy.warn?'。'+sy.warn:'')}
+  else se.style.display='none';
   $('iInterpMe').checked=!!L.interp_me;$('iInterpThem').checked=!!L.interp_them;$('iInterpIntro').checked=L.interp_intro!==false;$('iInterpPass').checked=!!L.interp_passthrough;$('iInterpDefMic').checked=L.interp_defmic!==false;interpVis()}
 function interpBody(b){if($('rInterp').style.display==='none')return true;
   b.interp_me=$('iInterpMe').checked;b.interp_them=$('iInterpThem').checked;b.interp_intro=$('iInterpIntro').checked;b.interp_passthrough=$('iInterpPass').checked;
@@ -1671,7 +1677,12 @@ function _ttsFillWhere(info,prevW){
   cselSetValue($('iTtsWhere'),locs.some(l=>l.value===prevW&&l.available)?prevW:firstOk);
   const m=_ttsModel(),mn=$('ttsModelNote');mn.textContent=(m&&m.note)||'';
   mn.style.color=m&&!m.default?'var(--orange)':'var(--text-dim)';
+  _ttsWhereNote();
   $('rTtsSteps').style.display=cselVal($('iTtsWhere'))==='mlx'?'':'none'}
+/* 本機 NVIDIA（beta）：顯示卡記憶體（後端 vram）不夠時的警告（warn），夠的話寫剩多少 */
+function _ttsWhereNote(){const el=$('ttsWhereNote');if(!el)return;const l=_ttsLocs().find(x=>x.value===cselVal($('iTtsWhere')))||{},v=l.vram;
+  el.textContent=l.warn||(v&&l.available?'顯示卡（'+(v.name||'NVIDIA')+'）記憶體：剩 '+v.free_gb.toFixed(1)+' GB／共 '+v.total_gb.toFixed(1)+' GB':'');
+  el.style.color=l.warn?'var(--orange)':'var(--text-dim)'}
 function _ttsFillVoices(info,prev){
   const vs=info.voices||[],G=info.genders||{},grp={};
   if(!vs.length){cselSetItems($('iTtsVoice'),[{value:'',label:'還沒有聲音：按「管理聲音」匯入',tag:'',disabled:true}]);cselSetValue($('iTtsVoice'),'','還沒有聲音：按「管理聲音」匯入');return}

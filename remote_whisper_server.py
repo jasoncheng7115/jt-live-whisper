@@ -648,7 +648,10 @@ def _tts_worker_main():
     """只聽 127.0.0.1。POST /synthesize {text, voice_wav, voice_text, custom, steps, cfg, lang} → audio/wav（48 kHz 單聲道）；
     POST /synthesize_stream（同上）→ 邊合成邊送 16-bit PCM（audio/L16，X-TTS-SR 取樣率，送完關連線；雙向口譯用，v2.28.0）；
     POST /convert {text, custom} → {spoken}（送進模型的文字，除錯與測試用）。
-    lang＝en：英文句子，不套台灣念法與中文數字念法（_tts_en_text）"""
+    POST /ping → {ok, ready}：只是讓它不要閒置結束（用戶端本機口譯會議中沒人說話時，v2.33.0）。
+    lang＝en：英文句子，不套台灣念法與中文數字念法（_tts_en_text）。
+    顯示卡記憶體（v2.33.0）：/health 的 vram、合成回應的 X-TTS-VRAM-Free／X-TTS-VRAM-Total（GB）：
+    用戶端本機合成拿來警告「快用完了」（Windows 的驅動用完不會出錯，改借系統記憶體、合成慢很多）"""
     import http.server
     import io
     import signal
@@ -677,6 +680,21 @@ def _tts_worker_main():
                     os._exit(0)
     threading.Thread(target=_watch, daemon=True).start()
 
+    def _vram():
+        """這個行程用的那張卡：剩多少、共多少、這個行程佔了多少、最多佔到多少（GB）；還沒載入 torch 時 None"""
+        t = R.get("torch")
+        try:
+            free, total = t.cuda.mem_get_info()
+            g = 1024 ** 3
+            return {"free_gb": round(free / g, 2), "total_gb": round(total / g, 2),
+                    "used_gb": round(t.cuda.memory_reserved() / g, 2), "peak_gb": round(t.cuda.max_memory_reserved() / g, 2)}
+        except Exception:
+            return None
+
+    def _vram_headers():
+        v = _vram()
+        return {"X-TTS-VRAM-Free": f"{v['free_gb']:.2f}", "X-TTS-VRAM-Total": f"{v['total_gb']:.2f}"} if v else {}
+
     class _H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -696,7 +714,7 @@ def _tts_worker_main():
                 return self._send(404, {"error": "not found"})
             if state["error"]:
                 return self._send(500, {"ok": False, "error": state["error"]})
-            self._send(200, {"ok": True, "model": TTS_MODEL}) if state["ready"] \
+            self._send(200, {"ok": True, "model": TTS_MODEL, "vram": _vram()}) if state["ready"] \
                 else self._send(503, {"ok": False, "loading": True})
 
         def do_POST(self):
@@ -707,6 +725,8 @@ def _tts_worker_main():
                 state["last"] = time.monotonic()
 
         def _post(self):
+            if self.path == "/ping":            # do_POST 已經記下時間
+                return self._send(200, {"ok": True, "ready": state["ready"]})
             if self.path not in ("/synthesize", "/synthesize_stream", "/convert"):
                 return self._send(404, {"error": "not found"})
             if not state["ready"]:
@@ -735,7 +755,7 @@ def _tts_worker_main():
                 self._send(200, buf.getvalue(), "audio/wav", {
                     "X-TTS-Spoken": urllib.parse.quote(sp),
                     "X-TTS-Duration": f"{len(wav) / R['sr']:.3f}",
-                    "X-TTS-Seconds": f"{time.monotonic() - t0:.3f}"})
+                    "X-TTS-Seconds": f"{time.monotonic() - t0:.3f}", **_vram_headers()})
             except Exception as e:
                 self._send(500, {"error": f"{type(e).__name__}: {e}"})
 
@@ -755,6 +775,8 @@ def _tts_worker_main():
             self.send_header("X-TTS-SR", str(R["sr"]))
             self.send_header("X-TTS-Spoken", urllib.parse.quote(sp))
             self.send_header("X-TTS-First", f"{time.monotonic() - t0:.3f}")
+            for k, v in _vram_headers().items():
+                self.send_header(k, v)
             self.send_header("Connection", "close")
             self.end_headers()
             try:
@@ -1333,7 +1355,7 @@ from starlette.concurrency import run_in_threadpool
 # **必須與 translate_meeting.py 的 APP_VERSION 同步**（版本號同步清單第 9 處）。
 # 2026-09-21 之前伺服器完全沒有版本號，用戶端也不檢查——GPU 上的服務缺了
 # v2.20.0 的講者辨識時間軸修正，而它是預設路徑，三天沒有人發現。
-SERVER_VERSION = "2.32.0"
+SERVER_VERSION = "2.33.0"
 
 # 講者辨識：只有 >= 這個秒數的段落才進分群（1.6s = resemblyzer partial 長度，
 # 短於它的聲紋是補零算出來的）。與 translate_meeting.py 必須一致。

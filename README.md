@@ -1,4 +1,4 @@
-# jt-live-whisper v2.32.0
+# jt-live-whisper v2.33.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要、台灣華語朗讀，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -85,7 +85,7 @@ Author: Jason Cheng (Jason Tools)
 |------|------|-----------|
 | **PyTorch**（CUDA 13） | GPU 伺服器朗讀（VoxCPM2 比說話快一點；BreezyVoice 約 1.2～2.5 倍音訊長度） | VoxCPM2（bf16）、BreezyVoice |
 | **mlx-audio** | Apple Silicon Mac 本機朗讀（記憶體 16 GB 以上，大約跟說話一樣快） | VoxCPM2（MLX 8bit） |
-| **PyTorch**（CUDA 12.8／13） | Windows 本機朗讀（NVIDIA 顯示卡，**beta**，v2.32.0 起） | VoxCPM2（bf16） |
+| **PyTorch**（CUDA 12.8／13） | Windows 本機朗讀與口譯合成（NVIDIA 顯示卡，**beta**，v2.32.0 起；口譯 v2.33.0 起） | VoxCPM2（bf16） |
 
 
 
@@ -196,7 +196,7 @@ v2.25.0 起改用 [jt-doc-tools](https://jasoncheng7115.github.io/jt-doc-tools/)
 
 ### 7. 文字轉語音：台灣華語朗讀（v2.27.0）
 WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文字檔，邊念邊顯示字幕（字幕模式、懸浮字幕都可以用）；選「**文字轉語音檔**」直接存成 MP3／WAV。命令列：`./start.sh --tts-file 講稿.txt`。
-在自己的 **GPU 伺服器** 或 **Apple Silicon Mac** 上合成，不使用作業系統內建的語音；**Windows 有 NVIDIA 顯示卡**也可以選用本機合成（**beta**，v2.32.0 起，`.\install.ps1 -LocalTTS`，約 20 GB，見 SOP 4-15）。
+在自己的 **GPU 伺服器** 或 **Apple Silicon Mac** 上合成，不使用作業系統內建的語音；**Windows 有 NVIDIA 顯示卡**也可以選用本機合成（**beta**，v2.32.0 起，`.\install.ps1 -LocalTTS`，約 20 GB 磁碟、8 GB 以上顯示卡記憶體，見 SOP 4-15）。v2.33.0 起雙向語音口譯也能用它，並偵測顯示卡記憶體：開始前剩不到 8 GB、使用中剩不到 1 GB 都會提醒（Windows 的驅動用完不會出錯，而是改借系統記憶體、慢很多）。
 
 - **合成模型**：預設 [OpenBMB VoxCPM2](https://huggingface.co/openbmb/VoxCPM2)（Apache-2.0），**選它當預設是為了速度與效能**：GPU 伺服器比說話快一點、Mac 本機大約跟說話一樣快，兩種機器都能跑，邊念邊播不會卡。
   另外可選 [MediaTek BreezyVoice](https://huggingface.co/MediaTek-Research/BreezyVoice-300M)（Apache-2.0）：**台灣口音，但合成速度慢，不適合即時**（合成時間約音訊長度的 1.2～2.5 倍），只在 GPU 伺服器；安裝或升級時會問要不要加裝（預設否），適合轉成語音檔、不趕時間的時候
@@ -218,7 +218,7 @@ WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文�
 ![文字轉語音：台灣華語朗讀](images/tts-settings.png)
 
 ### 8. 雙向語音口譯（英中，v2.28.0）
-英中雙向即時模式多一個「**語音口譯**」：**對方說的英文翻成中文念給你聽**（耳機），**你說的中文翻成英文念給對方聽**（經虛擬麥克風送進會議軟體）。字幕與逐字稿照舊。合成在 GPU 伺服器。**原理上任何線上會議軟體都能用**（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合；目前實際開會測過的是 Jitsi Meet。
+英中雙向即時模式多一個「**語音口譯**」：**對方說的英文翻成中文念給你聽**（耳機），**你說的中文翻成英文念給對方聽**（經虛擬麥克風送進會議軟體）。字幕與逐字稿照舊。合成在 GPU 伺服器；沒有 GPU 伺服器的 Windows 可以用本機 NVIDIA 顯示卡（**beta**，v2.33.0 起，`.\install.ps1 -LocalTTS`）。**原理上任何線上會議軟體都能用**（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合；目前實際開會測過的是 Jitsi Meet。
 
 > **事前準備：念給對方聽要有「虛擬麥克風」**（會議軟體只能從麥克風收聲音）
 > - **macOS：要先安裝 [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)**（免費，GPL-3.0）：`brew install --cask blackhole-2ch`，需要管理者密碼、裝完重新開機
