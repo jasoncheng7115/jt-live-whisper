@@ -1,4 +1,4 @@
-# jt-live-whisper v2.33.0
+# jt-live-whisper v2.34.0
 
 **100% 全地端 AI 語音工具箱**：即時轉錄、即時翻譯、錄音檔批次處理、講者辨識、會議摘要、台灣華語朗讀，所有 AI 模型皆在自有設備上執行，資料不經過任何雲端服務。
 
@@ -218,7 +218,7 @@ WebUI「輸入來源」選「**文字內容朗讀**」：貼上文字或選文�
 ![文字轉語音：台灣華語朗讀](images/tts-settings.png)
 
 ### 8. 雙向語音口譯（英中，v2.28.0）
-英中雙向即時模式多一個「**語音口譯**」：**對方說的英文翻成中文念給你聽**（耳機），**你說的中文翻成英文念給對方聽**（經虛擬麥克風送進會議軟體）。字幕與逐字稿照舊。合成在 GPU 伺服器；沒有 GPU 伺服器的 Windows 可以用本機 NVIDIA 顯示卡（**beta**，v2.33.0 起，`.\install.ps1 -LocalTTS`）。**原理上任何線上會議軟體都能用**（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合；目前實際開會測過的是 Jitsi Meet。
+英中雙向即時模式多一個「**語音口譯**」：**對方說的英文翻成中文念給你聽**（耳機），**你說的中文翻成英文念給對方聽**（經虛擬麥克風送進會議軟體）。字幕與逐字稿照舊。合成在 GPU 伺服器；沒有 GPU 伺服器的 Windows 可以用本機 NVIDIA 顯示卡（**beta**，v2.33.0 起，`.\install.ps1 -LocalTTS`），Apple Silicon Mac 也可以在本機合成（**beta**，v2.34.0 起，裝了本機朗讀就能用）。**建議用 GPU 伺服器或 Windows＋NVIDIA**：Mac 合成比說話慢（MacBook Air 實測要花語音長度的 1.5～2.7 倍），一句合成完才念，只適合偶爾說幾句，兩邊連續說話時會跟不上。**原理上任何線上會議軟體都能用**（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合；目前實際開會測過的是 Jitsi Meet。
 
 > **事前準備：念給對方聽要有「虛擬麥克風」**（會議軟體只能從麥克風收聲音）
 > - **macOS：要先安裝 [BlackHole 2ch](https://github.com/ExistentialAudio/BlackHole)**（免費，GPL-3.0）：`brew install --cask blackhole-2ch`，需要管理者密碼、裝完重新開機

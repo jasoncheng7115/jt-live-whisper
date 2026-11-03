@@ -1233,7 +1233,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.33.0",
+        "last": last, "version": "2.34.0",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -2117,17 +2117,19 @@ def _cuda_vram_info(prov):
 
 
 def _interp_synth_info(cfg, refresh=False):
-    """雙向口譯會在哪裡合成（同主程式 _interp_build：GPU 伺服器優先，沒有時本機 NVIDIA，beta）"""
+    """雙向口譯會在哪裡合成（同主程式 _interp_build：GPU 伺服器優先，沒有時本機 NVIDIA、Mac 本機，都是 beta）"""
     try:
         prov, why = _tts.pick_interp_provider(cfg, refresh=refresh)
     except Exception as e:
         return {"available": False, "reason": f"{type(e).__name__}: {e}"}
     if prov is None:
         return {"available": False, "reason": why}
-    out = {"available": True, "kind": prov.kind, "label": prov.label, "beta": prov.kind == "cuda"}
+    out = {"available": True, "kind": prov.kind, "label": prov.label, "beta": prov.kind in ("cuda", "mlx")}
     if prov.kind == "cuda":
         out["warn"] = _cuda_vram_info(prov)["warn"]
-    return out       # 合成位置（cuda＝本機 NVIDIA 顯示卡，beta，v2.32.0）
+    if out["beta"]:
+        out["note"] = getattr(prov, "note", "")      # 同主程式開始時印的那句
+    return out       # 合成位置（cuda＝本機 NVIDIA 顯示卡，beta，v2.32.0；mlx＝Mac 本機，beta，v2.34.0）
 
 
 def _tts_info(admin, refresh=False):

@@ -141,7 +141,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.33.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.34.0 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -3013,7 +3013,7 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 </code></pre>
 <p>它會建立獨立的 Python 環境 <code>~/jt-whisper-server/venv-breezy</code>、下載 BreezyVoice 的程式（固定版本，放在 <code>~/jt-whisper-server/breezyvoice/</code>）與模型，裝完約佔 8 GB（Python 環境 5.5 GB、模型 2.2 GB），安裝時要有 16 GB 可用空間。
 GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（重新執行安裝程式就會更新）。</p>
-<p><strong>Mac 本機</strong>（Apple Silicon、記憶體 16 GB 以上）：<code>./install.sh</code> 會問「是否在這台 Mac 啟用本機文字轉語音？」（預設「是」，按 Enter 就裝），下載 MLX 版模型與台灣念法資源（放在安裝資料夾的 <code>tts_data/</code>）。</p>
+<p><strong>Mac 本機</strong>（Apple Silicon、記憶體 16 GB 以上）：<code>./install.sh</code> 會問「是否在這台 Mac 啟用本機文字轉語音？」（預設「是」，按 Enter 就裝），下載 MLX 版模型與台灣念法資源（放在安裝資料夾的 <code>tts_data/</code>）。v2.34.0 起沒有 GPU 伺服器時，雙向語音口譯也會用它（beta，會跟不上，見 4-16）。</p>
 <p><strong>Windows 本機 NVIDIA 顯示卡（beta，v2.32.0 起）</strong>：沒有 GPU 伺服器、但這台 Windows 有 NVIDIA 顯示卡時，可以在本機合成。選用安裝：</p>
 <pre><code class="language-powershell">.\install.ps1 -LocalTTS
 </code></pre>
@@ -3279,7 +3279,12 @@ WebUI 啟動時會自動換成新格式，密碼不變），設定檔裡沒有�
 <li><strong>念給我聽</strong>：對方說的英文翻成中文，用台灣華語念到你的耳機</li>
 <li><strong>念給對方聽</strong>：你說的中文翻成英文，念進「虛擬麥克風」，會議軟體把它當成你的麥克風送出去</li>
 </ul>
-<p>字幕、逐字稿照舊，只是多了語音。合成在 GPU 伺服器（要有文字轉語音，見 4-15；GPU 伺服器要 v2.28.0 以上才有邊合成邊播）；沒有能用的 GPU 伺服器、但裝了 Windows 本機 NVIDIA 合成（<code>.\install.ps1 -LocalTTS</code>）時，改在本機顯示卡合成（<strong>beta</strong>，v2.33.0 起，需要 8 GB 以上顯示卡記憶體，見 4-15）。</p>
+<p>字幕、逐字稿照舊，只是多了語音。合成在 GPU 伺服器（要有文字轉語音，見 4-15；GPU 伺服器要 v2.28.0 以上才有邊合成邊播）；沒有能用的 GPU 伺服器、但裝了 Windows 本機 NVIDIA 合成（<code>.\install.ps1 -LocalTTS</code>）時，改在本機顯示卡合成（<strong>beta</strong>，v2.33.0 起，需要 8 GB 以上顯示卡記憶體，見 4-15）。Apple Silicon Mac 裝了本機朗讀（見 4-15）時，沒有能用的 GPU 伺服器也可以在本機合成（<strong>beta</strong>，v2.34.0 起），但<strong>建議用 GPU 伺服器或 Windows＋NVIDIA</strong>：</p>
+<ul>
+<li>Mac 合成比說話慢（MacBook Air 32 GB 實測：合成要花語音長度的 1.5～2.7 倍，同時辨識時更慢），而且一句合成完才念（GPU 伺服器、NVIDIA 是邊合成邊念）</li>
+<li>實測兩邊每 3 秒輪流說一句：每句等 8～20 秒才念、8 句裡有 2 句等超過 15 秒被略過（字幕照樣顯示）。只適合偶爾說幾句的會議</li>
+<li>合成在另一個程式裡跑（不跟辨識搶，辨識照常），閒置 10 分鐘自己結束；有 GPU 伺服器時一律用 GPU 伺服器（設定頁的合成位置選「本機」也一樣），開始時與 WebUI「語音口譯」區都會說明這次在哪裡合成</li>
+</ul>
 <p><strong>原理上任何線上會議軟體都能用</strong>（Zoom、Microsoft Teams、Google Meet、Jitsi Meet…）：jt-live-whisper 聽的是電腦播出的會議聲音、說的話經麥克風送進會議，不需要會議軟體配合。<strong>目前實際開會測過的是 Jitsi Meet</strong>（網站上的示範圖），其他會議軟體還沒有完整實測。</p>
 <h4 id="事前準備與接線">事前準備與接線</h4>
 <p><strong>念給對方聽要有「虛擬麥克風」</strong>：會議軟體只能從麥克風收聲音，我們把英文念進虛擬麥克風、會議軟體從它收，對方才聽得到。口譯期間系統預設麥克風會自動切到它（v2.31.0 起，見下方），會議軟體的麥克風設成「與系統相同／預設」即可。「念給我聽」三個平台都不用另外安裝。</p>
@@ -3403,7 +3408,7 @@ usbip-win2 0.9.8.1 的命令列工具 <code>usbip.exe</code> 要載入兩個<str
 <ul>
 <li>目前只有英中雙向；日中、韓中之後再加</li>
 <li>只做線上會議（每個人戴耳機）；實體會議室（喇叭外放、同一個空間）不適合</li>
-<li>合成在 GPU 伺服器，或 Windows 本機 NVIDIA 顯示卡（beta）；Apple Silicon Mac 本機不提供（合成大約跟說話一樣快，兩個方向再加上辨識預估跟不上）；念給對方聽要 v2.28.0 以上的 GPU 伺服器（舊的念不對英文，開始時會說明）</li>
+<li>合成在 GPU 伺服器，或本機（beta）：Windows NVIDIA 顯示卡、Apple Silicon Mac（v2.34.0 起；比說話慢、一句合成完才念，連續說話會跟不上）；念給對方聽要 v2.28.0 以上的 GPU 伺服器（舊的念不對英文，開始時會說明）</li>
 <li>對方跟念給你聽的中文同時說話時，那一段錄音如果被判斷成中文就整段不辨識，字幕會少那幾秒</li>
 <li>WebUI 中途切換裝置會重新啟動：還沒念完的句子標「已停止」；Linux、Windows 自動建立的虛擬麥克風會保留，會議軟體不用改</li>
 </ul>

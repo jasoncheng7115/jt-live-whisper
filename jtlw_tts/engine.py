@@ -590,6 +590,7 @@ class CudaProvider:
     """本機 NVIDIA 顯示卡（beta）：本機的 remote_whisper_server.py --tts-worker，VoxCPM2 bf16、10 步（同 GPU 伺服器）"""
     kind = "cuda"
     label = "本機（NVIDIA 顯示卡，beta）"
+    note = "還沒在 Windows＋NVIDIA 實機開會測過"     # 口譯開始時、WebUI 口譯區說明（label 已經寫了 beta）
     _lock = threading.Lock()
     server = os.path.join(ROOT, "remote_whisper_server.py")
 
@@ -669,9 +670,22 @@ class CudaProvider:
             if msg:
                 _vram_warn("shortage", msg)
 
+    # 埠號、啟動指令、紀錄檔、擴散步數：Mac 本機口譯（MlxWorkerProvider，v2.34.0）照同一套方式叫自己的合成程式
+    port_env = "JTLW_TTS_LOCAL_PORT"
+    log_name = "local_tts_worker.log"
+
     @staticmethod
-    def _base():
-        return f"http://127.0.0.1:{CUDA_PORT}"
+    def _port():
+        return CUDA_PORT
+
+    def _base(self):
+        return f"http://127.0.0.1:{self._port()}"
+
+    def _cmd(self):
+        return [_cuda_python(), self.server, "--tts-worker", str(self._port())]
+
+    def _steps(self):
+        return 10
 
     def _ensure(self):
         """合成程式在（別的程式開的也算）就用；沒有就開一個，等它載入模型"""
@@ -696,15 +710,14 @@ class CudaProvider:
                     elif proc.poll() is not None:
                         raise TTSError("synth_failed", f"本機合成程式啟動失敗（結束碼 {proc.returncode}）" + self._log_hint(), 503)
                 elif code != 503:               # 埠號被別的程式佔用
-                    raise TTSError("synth_failed", f"本機合成的埠號 {CUDA_PORT} 被別的程式佔用（HTTP {code}）："
-                                   "可以用環境變數 JTLW_TTS_LOCAL_PORT 換一個", 503)
+                    raise TTSError("synth_failed", f"本機合成的埠號 {self._port()} 被別的程式佔用（HTTP {code}）："
+                                   f"可以用環境變數 {self.port_env} 換一個", 503)
                 if time.monotonic() > deadline:
                     raise TTSError("synth_failed", f"本機合成程式 {CUDA_LOAD_WAIT} 秒內沒有載入完成" + self._log_hint(), 503)
                 time.sleep(1)
 
-    @staticmethod
-    def _log_path():
-        return os.path.join(TMP_DIR, "local_tts_worker.log")
+    def _log_path(self):
+        return os.path.join(TMP_DIR, self.log_name)
 
     def _log_hint(self):
         try:
@@ -726,7 +739,7 @@ class CudaProvider:
         else:
             kw["start_new_session"] = True
         with open(self._log_path(), "w", encoding="utf-8") as log:
-            return subprocess.Popen([_cuda_python(), self.server, "--tts-worker", str(CUDA_PORT)], stdout=log, **kw)
+            return subprocess.Popen(self._cmd(), stdout=log, **kw)
 
     def _post(self, path, req, timeout=600):
         for attempt in (1, 2):
@@ -744,7 +757,7 @@ class CudaProvider:
     def synth(self, text, voice, custom, steps=None, lang="zh"):
         """一段 → (WAV 位元組, 送進模型的文字)。擴散步數固定 10（同 GPU 伺服器；Mac 的 6／10 不套用）"""
         req = {"text": text, "voice_wav": os.path.abspath(voice["wav"]), "voice_text": voice["transcript"],
-               "custom": custom or {}, "steps": 10}
+               "custom": custom or {}, "steps": self._steps()}
         if lang != "zh":
             req["lang"] = lang
         code, body, headers = self._post("/synthesize", req)
@@ -759,12 +772,12 @@ class CudaProvider:
         """串流合成（雙向口譯，v2.33.0 beta）：一段一段產生 (PCM, 取樣率)。介面同 RemoteProvider.synth_stream"""
         import http.client
         req = {"text": text, "voice_wav": os.path.abspath(voice["wav"]), "voice_text": voice["transcript"],
-               "custom": custom or {}, "steps": 10}
+               "custom": custom or {}, "steps": self._steps()}
         if lang != "zh":
             req["lang"] = lang
         for attempt in (1, 2):
             self._ensure()
-            conn = http.client.HTTPConnection("127.0.0.1", CUDA_PORT, timeout=120)
+            conn = http.client.HTTPConnection("127.0.0.1", self._port(), timeout=120)
             try:
                 conn.request("POST", "/synthesize_stream", json.dumps(req), {"Content-Type": "application/json"})
                 r = conn.getresponse()
@@ -799,6 +812,66 @@ class CudaProvider:
         if code != 200:
             raise TTSError("convert_failed", "台灣念法轉換失敗：" + (_err_detail(body) or f"HTTP {code}"), 502)
         return json.loads(body).get("spoken", "")
+
+
+# ── Apple Silicon 本機口譯（v2.34.0，beta；2026-11-03 使用者：「要讓 Mac 也能用本機口譯，但預設還是推薦 GPU server
+# 或 Windows 本機＋GPU」）──────────────────────────────────────────────────────────────
+# 口譯的合成放在另一個程式（jtlw_tts/mlx_worker.py）：主程式的 mlx-whisper 辨識也用 Metal，同一個程式裡不能同時推論，
+# 加鎖排隊的話辨識等超過一個步進就丟掉那段。朗讀照舊在主程式裡合成（MlxProvider，沒有辨識在搶）。
+# Mac 合成大約跟說話一樣快（M5 6 步 RTF 1.07～1.2），而且 mlx-audio 的 VoxCPM2 不能串流：一句合成完才念，兩邊連續說話時會跟不上
+MLX_PORT = int(os.environ.get("JTLW_TTS_MLX_PORT") or 19787)
+
+
+class MlxWorkerProvider(CudaProvider):
+    """Apple Silicon 本機合成程式（口譯用，beta）：python -m jtlw_tts.mlx_worker，共用一份、閒置自己結束（同 CudaProvider）"""
+    kind = "mlx"
+    label = "本機（Apple Silicon，beta）"
+    # 2026-11-03 MacBook Air 32 GB 實測：合成要花語音長度的 1.5～2.7 倍（同時辨識時更慢）；兩邊每 3 秒輪流一句，每句等 8～20 秒、8 句略過 2 句
+    note = ("Mac 合成比說話慢、一句合成完才念，只適合偶爾說幾句；兩邊連續說話時會跟不上（等超過 15 秒的句子會略過）。"
+            "建議用 GPU 伺服器或 Windows＋NVIDIA 顯示卡")
+    _lock = threading.Lock()
+    port_env = "JTLW_TTS_MLX_PORT"
+    log_name = "local_tts_mlx_worker.log"
+
+    def __init__(self, steps=6):
+        self.steps = steps
+
+    @staticmethod
+    def unavailable():
+        return MlxProvider.unavailable()
+
+    def health(self):
+        """不會啟動合成程式。不能串流（一句合成完才念）；英文用 _tts_en_text（同 GPU 伺服器）"""
+        why = self.unavailable()
+        if why is not None:
+            return {"available": False, "reason": why}
+        return {"available": True, "reason": None, "stream": False, "langs": ["zh", "en"], "beta": True}
+
+    @staticmethod
+    def _port():
+        return MLX_PORT
+
+    def _cmd(self):
+        return [sys.executable, "-m", "jtlw_tts.mlx_worker", str(self._port())]
+
+    def _steps(self):
+        return int(self.steps)
+
+    @staticmethod
+    def _precheck():
+        pass                                    # Mac 沒有獨立的顯示卡記憶體可以查
+
+    def running_vram(self):
+        return None
+
+    def vram(self):
+        return None
+
+    def check_vram(self):
+        return None
+
+    def synth_stream(self, text, voice, lang="zh", block=9600, custom=None):
+        raise TTSError("stream_unsupported", "Mac 本機合成不能串流", 501)
 
 
 _PICK_CACHE = {"t": 0.0, "key": None, "val": None}
@@ -865,15 +938,22 @@ def pick_provider(cfg, refresh=False, where=None, steps=None, model=None):
 def pick_interp_provider(cfg, refresh=True):
     """雙向口譯的合成 → (provider, None) 或 (None, 原因)。GPU 伺服器優先；沒有能用的 GPU 伺服器時，
     裝了本機 NVIDIA 合成（beta）就用本機（v2.33.0）。設定的合成位置是本機 NVIDIA（cuda）時先用本機。
-    Apple Silicon 本機不用：合成大約跟說話一樣快，兩個方向再加上辨識預估跟不上"""
+    Apple Silicon 本機排最後（beta，v2.34.0）：合成大約跟說話一樣快、不能串流，兩邊連續說話時會跟不上，
+    所以合成位置設成 mlx 也照樣先用 GPU 伺服器（使用者：預設還是推薦 GPU 伺服器或 Windows 本機＋NVIDIA）"""
     order = ("cuda", "remote") if settings(cfg)["provider"] == "cuda" else ("remote", "cuda")
     why = {}
     for where in order:
         p, why[where] = pick_provider(cfg, refresh=refresh, where=where)
         if p is not None:
             return p, None
+    if sys.platform == "darwin":
+        p, why["mlx"] = pick_provider(cfg, refresh=refresh, where="mlx")
+        if p is not None:
+            return MlxWorkerProvider(getattr(p, "steps", 6)), None
     msg = why["remote"] or "GPU 伺服器不能合成"
-    if os.name == "nt":
+    if sys.platform == "darwin":
+        msg += "；本機（Apple Silicon，beta）：" + (why.get("mlx") or "不能用")
+    elif os.name == "nt":
         msg += "；本機 NVIDIA 顯示卡（beta）：" + (why["cuda"] or "不能用")
     return None, msg
 
