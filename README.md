@@ -1025,6 +1025,12 @@ cd C:\jt-live-whisper
 
 &nbsp;
 
+## 資安問題通報
+
+發現資安問題請**不要開公開的 issue**，請依 [SECURITY.md](SECURITY.md) 私下通報（GitHub「Report a vulnerability」或 service@jason.tools）。
+
+&nbsp;
+
 ## License
 
 本專案的程式碼採用 [Apache License 2.0](LICENSE) 授權。
