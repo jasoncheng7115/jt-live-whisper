@@ -408,6 +408,8 @@ body.dark .ver-warn{background:#3a2f0b;color:#ffda6a;border-color:#665216}
   <div class="sec" id="rSecurity" style="display:none">
     <div class="sec-title"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="3" y="11" width="18" height="11" rx="2" stroke="currentColor"/><path d="M7 11V7a5 5 0 0110 0v4" stroke="currentColor" stroke-linecap="round"/></svg>安全設定</div>
     <div class="sec-hint">設定遠端存取密碼。本機（localhost）存取不需密碼。</div>
+    <div class="checks"><label><input type="checkbox" id="iListenAll" onchange="saveListen()"> 允許別台電腦連線</label></div>
+    <div style="font-size:11px;color:var(--text-dim);margin:-2px 0 8px" id="listenNote">不勾＝只有這台電腦打得開 WebUI。勾選後請設好唯讀與管理密碼；重新啟動 WebUI 後生效</div>
     <div class="fg"><label>唯讀密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwRead" placeholder="空白 = 不需密碼即可觀看字幕" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwRead',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button><button type="button" class="test-btn" id="pwClearRead" onclick="clearPw('read')" style="flex-shrink:0;display:none" title="清除已設定的密碼">清除</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px">遠端觀看即時字幕用，不能操作設定</div></div>
     <div class="fg"><label>管理密碼（選填）</label><div style="display:flex;gap:6px"><input type="password" id="iPwAdmin" placeholder="空白 = 不啟用遠端管理" style="flex:1"><button type="button" class="test-btn" onclick="togglePwVis('iPwAdmin',this)" style="flex-shrink:0;min-width:42px;display:flex;align-items:center;justify-content:center"><svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M1 12C1 12 5 4 12 4C19 4 23 12 23 12C23 12 19 20 12 20C5 20 1 12 1 12Z"/><circle cx="12" cy="12" r="3"/></svg></button><button type="button" class="test-btn" id="pwClearAdmin" onclick="clearPw('admin')" style="flex-shrink:0;display:none" title="清除已設定的密碼">清除</button></div><div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="pwAdminHint">未設定 = 遠端無法啟動/停止/切換裝置</div></div>
     <div style="margin-top:8px"><button class="test-btn" onclick="savePw()" style="display:inline-flex;align-items:center;gap:4px"><svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.5"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>儲存密碼</button><span id="pwResult" style="margin-left:8px;font-size:12px"></span></div>
@@ -760,6 +762,7 @@ async function loadCfg(){
       $('iPwAdmin').placeholder=pw.admin_set?'已設定（輸入新密碼以變更）':'空白 = 不啟用遠端管理';
       $('pwClearRead').style.display=pw.read_set?'':'none';
       $('pwClearAdmin').style.display=pw.admin_set?'':'none';
+      $('iListenAll').checked=!!pw.listen_all;_listenNote(pw.listen_all,pw.listen_all_now);
     }}catch(e){}
     _cfgStep('載入關鍵字通知設定...');
     $('rKeyword').style.display='';
@@ -1209,6 +1212,7 @@ const _tips={
   iInterpDefMic:'念給對方聽時，口譯期間把系統預設麥克風切到虛擬麥克風、結束切回；會議軟體的麥克風設成「與系統相同／預設」就不用每次自己選、自己改回',
   iKeepAwake:'即時模式期間電腦不會自動睡眠、螢幕不會自動關閉或鎖定（Linux 只防睡眠）；停止後恢復原本的設定',
   // 安全設定
+  iListenAll:'勾選：同網段的其他電腦、手機可以用這台的 IP 打開 WebUI（請設密碼）。不勾：只有這台電腦打得開。重新啟動 WebUI 後生效',
   iPwRead:'遠端觀看字幕用密碼。空白表示不需密碼即可觀看',
   iPwAdmin:'遠端管理用密碼。空白表示不啟用遠端管理功能',
   // 按鈕
@@ -1490,6 +1494,17 @@ async function clearPw(role){
     if(d.ok){$('pwClear'+(role==='read'?'Read':'Admin')).style.display='none';
       $(role==='read'?'iPwRead':'iPwAdmin').placeholder=role==='read'?'空白 = 不需密碼即可觀看字幕':'空白 = 不啟用遠端管理'}
   }catch(e){$('pwResult').innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span>'}
+}
+function _listenNote(want,now){
+  const base='不勾＝只有這台電腦打得開 WebUI。勾選後請設好唯讀與管理密碼；重新啟動 WebUI 後生效';
+  $('listenNote').innerHTML=want===now?esc(base):'<span style="color:var(--orange)">'+(want?'已設為允許別台電腦連線':'已設為只有這台電腦連得到')+'，重新啟動 WebUI 後才會生效（目前'+(now?'別台電腦連得進來':'只有這台連得到')+'）</span>';
+}
+async function saveListen(){
+  const want=$('iListenAll').checked;
+  try{const res=await fetch('/api/save-listen',{method:'POST',headers:_authHeaders(),body:JSON.stringify({all:want})});const d=await res.json();
+    if(!d.ok){$('iListenAll').checked=!want;showToast(d.error||'儲存失敗','err');return}
+    _listenNote(want,d.restart?!want:want);
+  }catch(e){$('iListenAll').checked=!want;showToast('儲存失敗：'+e,'err')}
 }
 async function savePw(){
   // 只送有填的欄位。空白＝不更動（要清除請按旁邊的「清除」）

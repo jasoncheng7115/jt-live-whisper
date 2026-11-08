@@ -141,7 +141,7 @@
   </aside>
   <article class="doc-body md">
 <h1 id="jt-live-whisper-安裝與使用-sop">jt-live-whisper 安裝與使用 SOP</h1>
-<p>即時英翻中字幕系統 v2.34.0 (by Jason Cheng)</p>
+<p>即時英翻中字幕系統 v2.34.1 (by Jason Cheng)</p>
 <table>
 <thead>
 <tr>
@@ -1402,6 +1402,15 @@ v2.27.0 起安裝程式（含 <code>-Upgrade</code>）在 Windows 預設狀態�
 <li>淺色/深色主題切換</li>
 <li>字幕轉發：即時字幕自動轉發到通訊平台（見下方說明）</li>
 </ul>
+<h4 id="讓別台電腦手機連-webuiv2341-起新安裝預設只限本機">讓別台電腦、手機連 WebUI（v2.34.1 起新安裝預設只限本機）</h4>
+<p>新安裝的 WebUI <strong>只有執行它的這台電腦打得開</strong>，同網段的其他電腦、手機連不進來。要從別台看字幕或操作：</p>
+<ol>
+<li>在這台電腦開 WebUI →「安全設定」，勾選「<strong>允許別台電腦連線</strong>」</li>
+<li>設好唯讀密碼（看畫面、讀逐字稿）與管理密碼（開始、停止、上傳）；沒設唯讀密碼時，連得到的人都看得到畫面與逐字稿</li>
+<li>結束 WebUI 再重新啟動，之後別台用 <code>http://&lt;這台的 IP&gt;:19781</code> 開啟</li>
+</ol>
+<p>不想開放的話也可以用 SSH 通道（見「伺服器版的 WebUI 能從別台電腦操作到什麼程度」），不必勾選。設定存在 <code>config.json</code> 的 <code>webui.listen</code>（<code>127.0.0.1</code>＝只限本機、<code>0.0.0.0</code>＝別台連得進來）。</p>
+<p><strong>從 v2.34.0 以前升級上來的不會被改成只限本機</strong>：設過 WebUI 密碼、來源 IP 允許清單、信任的代理、TLS，或用 WebUI 開始過作業的安裝，升級後照舊讓別台連線（第一次啟動時記成 <code>0.0.0.0</code>）；只用過終端機選單、從沒用 WebUI 開始過作業的，會變成只限本機。伺服器版（<code>install.sh --server</code>）安裝時就設成讓別台連線。啟動時終端機會寫目前是哪一種。</p>
 <h3 id="4-3-字幕轉發功能">4-3. 字幕轉發功能</h3>
 <p>即時辨識的字幕可自動轉發到通訊平台，每隔指定秒數發送一次累積字幕。支援同時多平台。</p>
 <p><strong>支援平台：</strong></p>
@@ -3163,7 +3172,7 @@ GPU 伺服器的程式比較舊時，安裝程式會說明先更新伺服器（�
 <hr>
 <h3 id="伺服器版的-webui-能從別台電腦操作到什麼程度">伺服器版的 WebUI 能從別台電腦操作到什麼程度</h3>
 <p><code>install.sh --server</code> 會把 WebUI 裝成 systemd 服務（<code>jt-live-whisper-webui</code>，
-預設埠 <strong>19781</strong>，綁 <code>0.0.0.0</code>）。但從<strong>別台電腦的瀏覽器</strong>連進去時有兩道限制：</p>
+預設埠 <strong>19781</strong>，讓別台電腦連得進來：<code>webui.listen</code> 是 <code>0.0.0.0</code>，安裝時就這樣設）。但從<strong>別台電腦的瀏覽器</strong>連進去時有兩道限制：</p>
 <table>
 <thead>
 <tr>

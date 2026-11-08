@@ -482,6 +482,79 @@ def _load_passwords():
 
 _load_passwords()
 
+
+# ─── 監聽位址（v2.34.1，2026-11-08 外部 review：「隱私優先的產品，預設綁 0.0.0.0、用警告兜底，方向是反的」）──
+# config.json 的 webui.listen：「0.0.0.0」＝別台電腦連得進來、「127.0.0.1」＝只有這台。
+# 沒有這個鍵時（這一版第一次啟動）決定一次並**寫回設定檔**：
+#   看得出這份安裝已經給別台用、或打算給別台用（設過 WebUI 密碼、允許清單、信任的代理、TLS，或用過 WebUI）→ 0.0.0.0，升級不會斷；
+#   其他（新裝、只用過命令列）→ 127.0.0.1。之後照設定檔，畫面「安全設定」可以改（重新啟動 WebUI 才生效）。
+# 一定要寫回：不寫的話，新裝的用過一次 WebUI（有了 webui_last）下次啟動就變成 0.0.0.0。
+# 伺服器版（install-linux.sh --server）安裝時產生密碼，所以也是 0.0.0.0；`JTLW_WEBUI_LISTEN` 蓋過設定檔、不寫回（測試用）
+LISTEN_ALL, LISTEN_LOCAL = "0.0.0.0", "127.0.0.1"
+_LISTEN_NOW = [""]          # 這次啟動實際監聽的位址（main() 設定；畫面用來提示「重新啟動後生效」）
+
+
+def _listen_valid(v):
+    import ipaddress
+    try:
+        ipaddress.ip_address(str(v).strip())
+        return True
+    except ValueError:
+        return False
+
+
+def _listen_decide(cfg, env=None):
+    """回傳 (監聽位址, 要不要寫回 webui.listen, 說明)"""
+    env = os.environ if env is None else env
+    v = env.get("JTLW_WEBUI_LISTEN", "").strip()
+    if v:
+        if _listen_valid(v):
+            return v, False, "JTLW_WEBUI_LISTEN"
+        return LISTEN_LOCAL, False, f"看不懂 JTLW_WEBUI_LISTEN「{v}」，只讓這台連"
+    w = cfg.get("webui") or {}
+    if "listen" in w:
+        v = str(w.get("listen") or "").strip()
+        if _listen_valid(v):
+            return v, False, "設定檔"
+        return LISTEN_LOCAL, False, f"看不懂設定檔的 webui.listen「{v}」，只讓這台連"
+    wp = cfg.get("webui_passwords") or {}
+    remote = (any(str(x).strip() for x in wp.values())
+              or w.get("allowed_ips") or w.get("trusted_proxies") or w.get("tls")
+              or env.get("JTLW_WEBUI_ALLOWED_IPS") or env.get("JTLW_WEBUI_TLS", "") in ("1", "on", "true")
+              or "webui_last" in cfg)
+    if remote:
+        return LISTEN_ALL, True, "已經設定過遠端連線或用過 WebUI，維持別台電腦連得進來"
+    return LISTEN_LOCAL, True, "新安裝預設只讓這台連"
+
+
+def _listen_host():
+    """啟動時呼叫：決定監聽位址，第一次決定時寫回設定檔（寫不進去就只用這一次）"""
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+    except (OSError, ValueError) as e:
+        print(f"  [安全] 設定檔讀不懂，只讓這台電腦連線：{e}")
+        return LISTEN_LOCAL
+    host, persist, why = _listen_decide(cfg)
+    if persist:
+        try:
+            cfg.setdefault("webui", {})["listen"] = host
+            _write_config(cfg)
+        except Exception as e:
+            print(f"  [安全] 監聽位址寫不進設定檔（下次啟動會再判斷一次）：{e}")
+    if "看不懂" in why:
+        print(f"  [安全] {why}")
+    return host
+
+
+def _listen_is_all(host):
+    """別台電腦連得進來嗎（0.0.0.0、::、或這台的對外位址）"""
+    import ipaddress
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _is_local(request) -> bool:
     """判斷是否為本機連線。
 
@@ -1233,7 +1306,7 @@ def _get_config():
         "default_engine": "llm" if llm_host else "nllb",
         "sck": sck, "is_macos": sys.platform == "darwin",
         "is_linux": sys.platform.startswith("linux"),
-        "last": last, "version": "2.34.0",
+        "last": last, "version": "2.34.1",
         # 網頁需要的後端功能等級：只換了檔案、WebUI 沒重開時，新網頁會連到舊後端（2026-10-09 Mac 實際發生：
         # 「無法取得文字轉語音狀態」）。網頁發現等級不夠就請使用者重新啟動 WebUI，不會亂報錯
         "api_level": 2, "interp_rate_default": _TM_INTERP_RATE_DEFAULT,
@@ -1305,8 +1378,30 @@ async def api_get_passwords(request: Request):
         return JSONResponse({"ok": False, "error": "僅限本機"}, status_code=403)
     # **不回傳密碼本身**（現在存的是雜湊，回傳雜湊更糟——前端會把它當成密碼存回去）。
     # 只說有沒有設定，畫面用 placeholder 呈現。
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+    except (OSError, ValueError):
+        cfg = {}
     return {"read_set": bool(_webui_passwords["read"]),
-            "admin_set": bool(_webui_passwords["admin"])}
+            "admin_set": bool(_webui_passwords["admin"]),
+            "listen_all": _listen_is_all(_listen_decide(cfg)[0]),
+            "listen_all_now": _listen_is_all(_LISTEN_NOW[0] or LISTEN_ALL)}
+
+
+@app.post("/api/save-listen")
+async def api_save_listen(request: Request, body: dict = {}):
+    """允許別台電腦連線（webui.listen，僅本機可改；重新啟動 WebUI 才生效）"""
+    if not _is_local(request):
+        return JSONResponse({"ok": False, "error": "僅限本機設定"}, status_code=403)
+    if not isinstance(body.get("all"), bool):
+        return JSONResponse({"ok": False, "error": "all 要是 true 或 false"}, status_code=400)
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+        cfg.setdefault("webui", {})["listen"] = LISTEN_ALL if body["all"] else LISTEN_LOCAL
+        _write_config(cfg)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    return {"ok": True, "restart": body["all"] != _listen_is_all(_LISTEN_NOW[0] or LISTEN_ALL)}
 
 
 @app.post("/api/save-passwords")
@@ -2012,7 +2107,7 @@ async def api_status(request: Request):
 
 def _remote_access_warnings():
     """啟動時的安全提醒（v2.22.3）：既有部署不自動改設定，但要讓管理者知道現況。
-    WebUI 綁 0.0.0.0，別台電腦連得進來；沒有唯讀密碼又沒有來源限制時，
+    只在別台電腦連得進來（webui.listen 是 0.0.0.0）時印；沒有唯讀密碼又沒有來源限制時，
     同網段任何人都能看畫面、列出錄音、讀逐字稿與摘要。"""
     out = []
     if not _webui_passwords["read"]:
@@ -2717,8 +2812,14 @@ def main():
             print("  [安全] 設定檔裡舊格式的 WebUI 密碼雜湊已換成加鹽的 PBKDF2（密碼不變）")
     except Exception as e:
         print(f"  [安全] 舊格式的 WebUI 密碼雜湊換不了，照舊格式比對：{e}")
-    for line in _remote_access_warnings():
-        print(f"  [安全提醒] {line}")
+    listen = _listen_host()
+    _LISTEN_NOW[0] = listen
+    if _listen_is_all(listen):
+        for line in _remote_access_warnings():
+            print(f"  [安全提醒] {line}")
+    else:
+        print("  只有這台電腦連得到 WebUI。要讓別台電腦連線：在這台的 WebUI →「安全設定」勾選「允許別台電腦連線」，"
+              "設好唯讀與管理密碼，再重新啟動 WebUI")
     # **一定要 flush**：systemd 下 stdout 是區塊緩衝，不 flush 的話上面這段
     # （包含憑證指紋）會卡在緩衝區，要等之後的輸出把它填滿才一起吐出來。
     # 管理者重啟後馬上看 journalctl 會看到「什麼都沒有」，而指紋正是那時
@@ -2733,7 +2834,7 @@ def main():
     signal.signal(signal.SIGINT, _sigint_handler)
 
     try:
-        _WebUIServer(_uvicorn_config(app=app, host="0.0.0.0", port=args.port, log_level="warning", **ssl_kw)).run()
+        _WebUIServer(_uvicorn_config(app=app, host=listen, port=args.port, log_level="warning", **ssl_kw)).run()
     except KeyboardInterrupt:
         pass
     finally:

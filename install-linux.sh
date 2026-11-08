@@ -496,6 +496,7 @@ for role in ("admin", "read"):
     wp[f"{role}_sha256"] = f"pbkdf2_sha256$200000${salt}${dk}"
     out.append(f"{role.upper()} {pw}")
 cfg["webui_passwords"] = wp
+cfg.setdefault("webui", {}).setdefault("listen", "0.0.0.0")   # 伺服器版就是給別台用（v2.34.1 起新裝的 WebUI 預設只限本機）
 p.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
 print("\n".join(out))
 PYEOF
